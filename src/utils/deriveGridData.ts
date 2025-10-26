@@ -12,7 +12,12 @@ export type GridColumn = {
   type: 'string' | 'number' | 'boolean' | 'date' | 'object' | 'array' | 'null' | 'undefined'
 }
 
-export type GridRow = Record<string, unknown>
+// ✅ FIX: GridRow can now have sub-rows for hierarchical data.
+export type GridRow = {
+  subRows?: GridRow[]
+  isSubRow?: boolean
+  [key: string]: unknown
+}
 
 export type DeriveResult = {
   rows: GridRow[]
@@ -23,9 +28,6 @@ export type DeriveResult = {
   note?: string
 }
 
-/**
- * ✅ FIX: New return type for the main function to include potential errors.
- */
 export type DerivationOutput = {
   data: DeriveResult | null
   error: string | null
@@ -38,15 +40,11 @@ export type DerivationOutput = {
  */
 function parseTolerant(text: string): [unknown, null] | [null, Error] {
   try {
-    // First, try the most lenient parser.
     return [JSON5.parse(text), null]
   } catch (e1) {
     try {
-      // If that fails, try the stricter, standard JSON parser.
       return [JSON.parse(text), null]
     } catch (e2) {
-      // ✅ FIX: As a last resort, try to parse as JSONL (JSON Lines).
-      // This is useful for logs or data streams.
       const lines = text.split(/\r?\n/).map(l => l.trim()).filter(Boolean)
       if (lines.length > 1) {
         const objs: unknown[] = []
@@ -55,18 +53,16 @@ function parseTolerant(text: string): [unknown, null] | [null, Error] {
           try {
             objs.push(JSON5.parse(l))
           } catch (e) {
-            // Keep track of the last error in case the whole file is invalid.
             lastError = e instanceof Error ? e : new Error(String(e))
           }
         }
         if (objs.length > 0) {
-          return [objs, null] // Successfully parsed at least one line.
+          return [objs, null]
         }
         if (lastError) {
           return [null, new Error(`Failed to parse as JSON or JSONL. Last line error: ${lastError.message}`)]
         }
       }
-      // If all attempts fail, return the most likely root cause (the first error from JSON5).
       return [null, e1 instanceof Error ? e1 : new Error(String(e1))]
     }
   }
@@ -77,7 +73,6 @@ function parseTolerant(text: string): [unknown, null] | [null, Error] {
 function* walkForArrays(node: unknown, path: string[]): Generator<{ path: string[]; arr: unknown[] }> {
   if (Array.isArray(node)) {
     yield { path, arr: node }
-    // also inspect elements
     for (let i = 0; i < node.length; i++) {
       yield* walkForArrays((node as unknown[])[i], path.concat(`[${i}]`))
     }
@@ -107,16 +102,14 @@ function scoreArray(arr: unknown[]): { score: number; reason: string; keys: stri
     }
   }
 
-  // If primitives: still allow by mapping to { value: ... }
   if (objectCount === 0) {
     return { score: 1 + Math.log10(arr.length + 1), reason: 'primitive-array', keys: ['value'] }
   }
 
   const keys = Array.from(keyFreq.entries())
-      .filter(([, n]) => n >= Math.ceil(sampleCount * 0.4)) // present in >= 40% of samples
+      .filter(([, n]) => n >= Math.ceil(sampleCount * 0.4))
       .map(([k]) => k)
 
-  // Score combines: objects ratio, number of stable keys, and length
   const ratio = objectCount / sampleCount
   const score = ratio * 70 + keys.length * 5 + Math.log10(arr.length + 1) * 10
   const reason = `objects=${objectCount}/${sampleCount}, keys=${keys.length}, len=${arr.length}`
@@ -125,9 +118,14 @@ function scoreArray(arr: unknown[]): { score: number; reason: string; keys: stri
 
 function buildColumns(rows: GridRow[]): GridColumn[] {
   const keys = new Set<string>()
-  for (const r of rows) for (const k of Object.keys(r)) keys.add(k)
+  for (const r of rows) {
+    if (r.isSubRow) continue // Don't use sub-rows to determine columns
+    for (const k of Object.keys(r)) keys.add(k)
+  }
+  keys.delete('subRows')
+  keys.delete('isSubRow')
+
   return Array.from(keys).map((k) => {
-    // infer type from first non-undefined value
     let t: GridColumn['type'] = 'undefined'
     for (const r of rows) {
       if (r[k] !== undefined) { t = inferType(r[k]); break }
@@ -142,10 +140,7 @@ function inferType(v: unknown): GridColumn['type'] {
   if (v === undefined) return 'undefined'
   const t = typeof v
   if (t === 'string') {
-    // Try date-like
-    const s = v as string
-    // quick ISO-ish or epoch test
-    if (/^\d{4}-\d{2}-\d{2}([T\s]\d{2}:\d{2}:\d{2}(\.\d{1,3})?([+-]\d{2}:\d{2}|Z)?)?$/.test(s)) return 'date'
+    if (/^\d{4}-\d{2}-\d{2}([T\s]\d{2}:\d{2}:\d{2}(\.\d{1,3})?([+-]\d{2}:\d{2}|Z)?)?$/.test(v as string)) return 'date'
     return 'string'
   }
   if (t === 'number') return 'number'
@@ -157,29 +152,70 @@ function inferType(v: unknown): GridColumn['type'] {
 /** Convert nested structures to short printable strings for grid cells */
 function toCell(v: unknown): unknown {
   const t = inferType(v)
-  if (t === 'object' || t === 'array') {
-    try { return JSON.stringify(v) } catch { return String(v) }
+  if (t === 'object') {
+    return v ? 'Object' : 'null'
   }
-  return v as never
+  if (t === 'array') {
+    return `Array(${(v as any[]).length})`
+  }
+  return v
 }
 
+/**
+ * @name generateSubRows
+ * @description Recursively generates a hierarchy of sub-rows from a nested object or array.
+ * @param data The nested data to process.
+ * @returns An array of GridRow objects representing the hierarchy.
+ */
+function generateSubRows(data: object): GridRow[] {
+  return Object.entries(data).map(([key, value]) => {
+    const subRow: GridRow = {
+      key,
+      value: toCell(value),
+      isSubRow: true,
+    }
+    if (value && typeof value === 'object') {
+      subRow.subRows = generateSubRows(value)
+    }
+    return subRow
+  })
+}
+
+/**
+ * @name normalizeRows
+ * @description Converts the best-candidate array into a hierarchical structure for the grid.
+ * @param arr The array of records to process.
+ * @param keys The primary keys to use for the main table columns.
+ * @returns An array of GridRow objects with potential `subRows`.
+ */
 function normalizeRows(arr: unknown[], keys: string[]): GridRow[] {
   if (keys.length === 1 && keys[0] === 'value') {
-    // primitives → { value }
     return arr.map((v) => ({ value: toCell(v) }))
   }
+
   return arr.map((v) => {
     if (v && typeof v === 'object' && !Array.isArray(v)) {
       const obj = v as Record<string, unknown>
       const row: GridRow = {}
-      for (const k of keys) row[k] = toCell(obj[k])
-      // also include occasional extra keys to avoid losing info
-      for (const k of Object.keys(obj)) {
-        if (!(k in row)) row[k] = toCell(obj[k])
+      const subRows: GridRow[] = []
+
+      const allObjKeys = new Set([...keys, ...Object.keys(obj)])
+
+      for (const k of allObjKeys) {
+        const val = obj[k]
+        if (val && typeof val === 'object') {
+          row[k] = toCell(val)
+          subRows.push(...generateSubRows({ [k]: val }))
+        } else {
+          row[k] = val
+        }
+      }
+
+      if (subRows.length > 0) {
+        row.subRows = subRows
       }
       return row
     }
-    // non-object element → put under "value"
     return { value: toCell(v) }
   })
 }
@@ -195,29 +231,25 @@ export function deriveGridData(text: string): DerivationOutput {
     return { data: null, error: null }
   }
 
-  // ✅ FIX: Capture the error from the tolerant parser.
   const [root, err] = parseTolerant(text)
   if (err) {
     return { data: null, error: err.message }
   }
 
-  // Gather all arrays in the graph
   const candidates: { path: string[]; arr: unknown[]; score: number; reason: string; keys: string[] }[] = []
   for (const { path, arr } of walkForArrays(root, ['$'])) {
     const { score, reason, keys } = scoreArray(arr)
     if (score > 0) candidates.push({ path, arr, score, reason, keys })
   }
   if (candidates.length === 0) {
-    // No error, but no data. GridView will show its default message.
     return { data: null, error: null }
   }
 
-  // Pick best scoring candidate
   candidates.sort((a, b) => b.score - a.score)
   const best = candidates[0]
   const rows = normalizeRows(best.arr, best.keys)
   const columns = buildColumns(rows)
-  const pathStr = best.path.join('.').replace(/\.\[/g, '[') // prettify $.data[0].items → $.data[0].items
+  const pathStr = best.path.join('.').replace(/\.\[/g, '[')
 
   const data: DeriveResult = {
     rows,

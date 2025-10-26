@@ -20,3 +20,6 @@ Push local to remote
   git push origin v0.1.0
 
 ```
+
+git tag -a v0.1.1 -m "baseline: grid working"
+git push origin v0.1.1

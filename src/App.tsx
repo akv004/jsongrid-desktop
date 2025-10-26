@@ -1,11 +1,23 @@
 import { useEffect, useState, useCallback, useMemo } from 'react'
+import { Allotment } from 'allotment'
+import 'allotment/dist/style.css' // Import the CSS for Allotment
+
 import EditorMonaco from './components/EditorMonaco'
 import GridView from './components/GridView'
 import { deriveGridData } from './utils/deriveGridData'
 import { useDebounce } from '@/hooks/useDebounce'
 
 const initialJson = `[
-  { "id": 1, "name": "Alice", "active": true, "email": "alice@example.com" },
+  { 
+    "id": 1, 
+    "name": "Alice", 
+    "active": true, 
+    "email": "alice@example.com",
+    "profile": {
+      "age": 30,
+      "roles": ["admin", "editor"]
+    }
+  },
   { "id": 2, "name": "Bob",   "active": false, "email": "bob@example.com" },
   { "id": 3, "name": "Charlie", "active": true, "email": "charlie@example.com" }
 ]`
@@ -18,7 +30,6 @@ function App() {
   // This state updates immediately on every keystroke, keeping the editor responsive.
   const [text, setText] = useState(initialJson)
   const [filePath, setFilePath] = useState<string>()
-  // ✅ FIX: Renamed state to be specific to file operation errors.
   const [fileError, setFileError] = useState<string | null>(null)
   const api = window.api
 
@@ -26,9 +37,7 @@ function App() {
   const debouncedText = useDebounce(text, 300)
 
   /**
-   * ✅ FIX: Use useMemo to efficiently derive grid data and capture parsing errors.
-   * This computation now only runs when the debounced text changes,
-   * and it provides crucial feedback to the user if the JSON is invalid.
+   * Use useMemo to efficiently derive grid data and capture parsing errors.
    */
   const { data: gridData, error: gridError } = useMemo(() => {
     return deriveGridData(debouncedText)
@@ -80,47 +89,54 @@ function App() {
   }, [api, filePath])
 
   return (
-      <div style={{ padding: 16, height: '100vh', boxSizing: 'border-box' }}>
-        <h1 style={{ marginTop: 0 }}>JSONGrid Desktop</h1>
-
-        <div style={{ display: 'flex', gap: 8, marginBottom: 8, alignItems: 'center' }}>
-          <button onClick={openFile} disabled={!api}>
-            Open (⌘/Ctrl+O)
-          </button>
-          <button onClick={saveFile} disabled={!api}>
-            Save (⌘/Ctrl+S)
-          </button>
-          <span style={{ marginLeft: 16, color: '#555', fontFamily: 'monospace' }}>
-          {filePath ? filePath : '(untitled)'}
-        </span>
-          {/* ✅ FIX: Display file operation errors or grid parsing errors in the header. */}
-          {(fileError || gridError) && (
-              <span
-                  title={fileError || gridError || ''}
-                  style={{ marginLeft: 16, color: '#b00020', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', flexShrink: 1 }}
-              >
-            {fileError || gridError}
+      // ✅ FIX: Use `height: 100%` to inherit from the now-fixed root elements.
+      <div style={{ height: '100%', boxSizing: 'border-box', display: 'flex', flexDirection: 'column', padding: 16, gap: 8 }}>
+        {/* Header section: does not grow or shrink. */}
+        <div style={{ flexShrink: 0 }}>
+          <h1 style={{ marginTop: 0, marginBottom: 8 }}>JSONGrid Desktop</h1>
+          <div style={{ display: 'flex', gap: 8, alignItems: 'center' }}>
+            <button onClick={openFile} disabled={!api}>
+              Open (⌘/Ctrl+O)
+            </button>
+            <button onClick={saveFile} disabled={!api}>
+              Save (⌘/Ctrl+S)
+            </button>
+            <span style={{ marginLeft: 16, color: '#555', fontFamily: 'monospace' }}>
+            {filePath ? filePath : '(untitled)'}
           </span>
-          )}
+            {(fileError || gridError) && (
+                <span
+                    title={fileError || gridError || ''}
+                    style={{ marginLeft: 16, color: '#b00020', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', flexShrink: 1 }}
+                >
+              {fileError || gridError}
+            </span>
+            )}
+          </div>
         </div>
 
-        <div style={{ display: 'flex', gap: 12, height: 'calc(100% - 110px)' }}>
-          {/* Left: Monaco code editor. It uses the immediate `text` state for responsiveness. */}
-          <div style={{ flex: 1, border: '1px solid #ddd', borderRadius: 6, overflow: 'hidden' }}>
-            <EditorMonaco value={text} onChange={setText} />
-          </div>
-
-          {/* Right: Grid view panel */}
-          <div style={{ width: '38%', border: '1px solid #ddd', borderRadius: 6, padding: 12, overflow: 'auto' }}>
-            {/* ✅ FIX: Conditionally render the GridView or show the parsing error prominently. */}
-            {gridError ? (
-                <div style={{ color: '#b00020', fontFamily: 'monospace' }}>
-                  <strong style={{ display: 'block', marginBottom: '8px' }}>Error Parsing Input</strong>
-                  <div>{gridError}</div>
+        {/* ✅ FIX: Use a robust relative/absolute positioning strategy to guarantee the content area fills the available space. */}
+        <div style={{ flex: '1 1 auto', minHeight: 0, position: 'relative' }}>
+          <div style={{ position: 'absolute', top: 0, left: 0, right: 0, bottom: 0 }}>
+            <Allotment>
+              <Allotment.Pane>
+                <div style={{ height: '100%', border: '1px solid #ddd', borderRadius: 6, overflow: 'hidden' }}>
+                  <EditorMonaco value={text} onChange={setText} />
                 </div>
-            ) : (
-                <GridView data={gridData} />
-            )}
+              </Allotment.Pane>
+              <Allotment.Pane>
+                <div style={{ height: '100%', border: '1px solid #ddd', borderRadius: 6, overflow: 'hidden' }}>
+                  {gridError ? (
+                      <div style={{ padding: 12, color: '#b00020', fontFamily: 'monospace' }}>
+                        <strong style={{ display: 'block', marginBottom: '8px' }}>Error Parsing Input</strong>
+                        <div>{gridError}</div>
+                      </div>
+                  ) : (
+                      <GridView data={gridData} />
+                  )}
+                </div>
+              </Allotment.Pane>
+            </Allotment>
           </div>
         </div>
       </div>
