@@ -4,57 +4,103 @@ import { join, dirname } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { readFile, writeFile } from 'node:fs/promises'
 
-// --- FIX: Recreate __dirname for ES Modules ---
 const __filename = fileURLToPath(import.meta.url)
 const __dirname = dirname(__filename)
-// ---
 
-async function createWindow() {
-    const win = new BrowserWindow({
-        width: 1280,
-        height: 800,
-        webPreferences: {
-            // This path will now be correctly resolved
-            preload: join(__dirname, '../preload/preload.js'),
-            contextIsolation: true,
-            nodeIntegration: false,
-            sandbox: true,
-        },
-    })
+process.env.APP_ROOT = join(__dirname, '../..')
 
-    if (!app.isPackaged) {
-        await win.loadURL(process.env.VITE_DEV_SERVER_URL!)
-        win.webContents.openDevTools()
-    } else {
-        // This path will also be correctly resolved
-        await win.loadFile(join(__dirname, '../../dist/index.html'))
-    }
+export const VITE_DEV_SERVER_URL = process.env['VITE_DEV_SERVER_URL']
+export const MAIN_DIST = join(process.env.APP_ROOT, 'dist-electron')
+export const RENDERER_DIST = join(process.env.APP_ROOT, 'dist')
+
+process.env.VITE_PUBLIC = VITE_DEV_SERVER_URL ? join(process.env.APP_ROOT, 'public') : RENDERER_DIST
+
+let win: BrowserWindow | null
+
+function createWindow() {
+  win = new BrowserWindow({
+    // FIX: Set a default title for the window.
+    title: 'JSONGrid',
+    icon: join(process.env.VITE_PUBLIC, 'electron-vite.svg'),
+    webPreferences: {
+      preload: join(MAIN_DIST, 'preload.cjs'),
+    },
+  })
+
+  win.webContents.on('did-finish-load', () => {
+    win?.webContents.send('main-process-message', new Date().toLocaleString())
+  })
+
+  if (VITE_DEV_SERVER_URL) {
+    win.loadURL(VITE_DEV_SERVER_URL)
+    // FIX: Open DevTools automatically in development mode.
+    win.webContents.openDevTools()
+  } else {
+    win.loadFile(join(RENDERER_DIST, 'index.html'))
+  }
 }
 
-// --- FIX: Added .catch() to handle potential errors during window creation ---
-app.whenReady().then(createWindow).catch(e => console.error('Failed to create window:', e))
-
-app.on('window-all-closed', () => { if (process.platform !== 'darwin') app.quit() })
-app.on('activate', () => { if (BrowserWindow.getAllWindows().length === 0) createWindow() })
-
-// File open/save IPC handlers
-ipcMain.handle('file:open', async () => {
-    const { canceled, filePaths } = await dialog.showOpenDialog({
-        filters: [{ name: 'JSON', extensions: ['json', 'jsonl'] }],
-        properties: ['openFile']
-    })
-    if (canceled || !filePaths[0]) return null
-    const text = await readFile(filePaths[0], 'utf-8')
-    return { filePath: filePaths[0], text }
+app.on('window-all-closed', () => {
+  if (process.platform !== 'darwin') {
+    app.quit()
+    win = null
+  }
 })
 
-ipcMain.handle('file:save', async (_e, p: { filePath?: string; text: string }) => {
-    let filePath = p.filePath
-    if (!filePath) {
-        const res = await dialog.showSaveDialog({ filters: [{ name: 'JSON', extensions: ['json'] }] })
-        if (res.canceled || !res.filePath) return null
-        filePath = res.filePath
+app.on('activate', () => {
+  if (BrowserWindow.getAllWindows().length === 0) {
+    createWindow()
+  }
+})
+
+app.whenReady().then(createWindow)
+
+ipcMain.handle('file:save', async (event, data: { filePath?: string; text: string }) => {
+  if (!win) return
+
+  const defaultPath = data.filePath || 'untitled.json'
+  const result = await dialog.showSaveDialog(win, {
+    defaultPath,
+    title: 'Save JSON File',
+    filters: [{ name: 'JSON Files', extensions: ['json'] }, { name: 'All Files', extensions: ['*'] }],
+  })
+
+  if (result.filePath) {
+    await writeFile(result.filePath, data.text, 'utf-8')
+    return { filePath: result.filePath }
+  }
+  return null
+})
+
+ipcMain.handle('file:open', async () => {
+  if (!win) return
+
+  const result = await dialog.showOpenDialog(win, {
+    title: 'Open JSON File',
+    properties: ['openFile'],
+    filters: [{ name: 'JSON Files', extensions: ['json'] }, { name: 'All Files', extensions: ['*'] }],
+  })
+
+  if (result.filePaths && result.filePaths.length > 0) {
+    const filePath = result.filePaths[0]
+    const content = await readFile(filePath, 'utf-8')
+    return {
+      filePath: filePath,
+      text: content,
     }
-    await writeFile(filePath, p.text, 'utf-8')
-    return { filePath }
+  }
+  return null
+})
+
+/**
+ * FIX: IPC handler to set the main window's title.
+ * This allows the renderer process to update the title bar based on the current file.
+ * It shows the filename for clarity.
+ */
+ipcMain.on('window:set-title', (event, filePath: string | undefined) => {
+  if (win) {
+    const baseTitle = 'JSONGrid'
+    const fileName = filePath ? filePath.split(/[/\\]/).pop() : undefined
+    win.setTitle(fileName ? `${fileName} — ${baseTitle}` : baseTitle)
+  }
 })

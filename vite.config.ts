@@ -7,8 +7,8 @@ import { fileURLToPath } from 'node:url'
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url))
 
+// https://vitejs.dev/config/
 export default defineConfig({
-  // Added a path alias for cleaner imports (e.g., import Component from '@/components/...')
   resolve: {
     alias: {
       '@': path.join(__dirname, 'src'),
@@ -16,35 +16,50 @@ export default defineConfig({
   },
   plugins: [
     react(),
-    // Updated to the modern, array-based configuration for vite-plugin-electron
     electron([
       {
-        // Main process entry file
+        // Main-process entry file of the Electron App.
         entry: 'electron/main/main.ts',
-        onstart(options) {
-          // This will start the Electron app once the main process is built
-          options.startup()
+        async onstart(options) {
+          await options.startup()
         },
         vite: {
           build: {
             sourcemap: true,
-            outDir: 'dist-electron/main',
+            outDir: 'dist-electron',
+            rollupOptions: {
+              output: {
+                format: 'cjs',
+                // ✅ FIX: This line is the crucial change.
+                // It instructs Vite/Rollup to create the output file at `main/main.js`
+                // inside the `outDir`, which matches the "main" entry in your package.json.
+                entryFileNames: 'main/main.js',
+              },
+            },
           },
         },
       },
       {
-        // Preload script entry file.
-        // The path is now absolute to avoid ambiguity.
+        // Preload-script entry file.
         entry: path.join(__dirname, 'electron/preload/preload.ts'),
         onstart(options) {
-          // This will reload the renderer process whenever the preload script is changed,
+          // Reload the renderer process whenever the preload script is changed,
           // instead of restarting the entire Electron app.
           options.reload()
         },
         vite: {
           build: {
-            sourcemap: true,
-            outDir: 'dist-electron/preload',
+            sourcemap: 'inline',
+            outDir: 'dist-electron',
+            lib: {
+              entry: path.join(__dirname, 'electron/preload/preload.ts'),
+              formats: ['cjs'],
+            },
+            rollupOptions: {
+              output: {
+                entryFileNames: 'preload.cjs',
+              },
+            },
           },
         },
       },
@@ -52,7 +67,6 @@ export default defineConfig({
     renderer(),
   ],
   build: {
-    // This enables sourcemaps for the renderer process build
-    sourcemap: true
+    sourcemap: true,
   },
 })
