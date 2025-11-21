@@ -1,65 +1,87 @@
-import { app as l, BrowserWindow as c, ipcMain as r, dialog as f } from "electron";
-import { dirname as m, join as n } from "node:path";
-import { fileURLToPath as w } from "node:url";
-import { writeFile as P, readFile as h } from "node:fs/promises";
-const u = w(import.meta.url), _ = m(u);
-process.env.APP_ROOT = n(_, "../..");
-const a = process.env.VITE_DEV_SERVER_URL, v = n(process.env.APP_ROOT, "dist-electron"), p = n(process.env.APP_ROOT, "dist");
-process.env.VITE_PUBLIC = a ? n(process.env.APP_ROOT, "public") : p;
-let e;
-function d() {
-  e = new c({
+import { app, BrowserWindow, ipcMain, dialog } from "electron";
+import { dirname, join } from "node:path";
+import { fileURLToPath } from "node:url";
+import { writeFile, readFile } from "node:fs/promises";
+const __filename = fileURLToPath(import.meta.url);
+const __dirname = dirname(__filename);
+process.env.APP_ROOT = join(__dirname, "../..");
+const VITE_DEV_SERVER_URL = process.env["VITE_DEV_SERVER_URL"];
+const MAIN_DIST = join(process.env.APP_ROOT, "dist-electron");
+const RENDERER_DIST = join(process.env.APP_ROOT, "dist");
+process.env.VITE_PUBLIC = VITE_DEV_SERVER_URL ? join(process.env.APP_ROOT, "public") : RENDERER_DIST;
+let win;
+function createWindow() {
+  win = new BrowserWindow({
     // FIX: Set a default title for the window.
     title: "JSONGrid",
-    icon: n(process.env.VITE_PUBLIC, "electron-vite.svg"),
+    icon: join(process.env.VITE_PUBLIC, "electron-vite.svg"),
     webPreferences: {
-      preload: n(v, "preload.cjs")
+      preload: join(MAIN_DIST, "preload.cjs")
     }
-  }), e.webContents.on("did-finish-load", () => {
-    e == null || e.webContents.send("main-process-message", (/* @__PURE__ */ new Date()).toLocaleString());
-  }), a ? (e.loadURL(a), e.webContents.openDevTools()) : e.loadFile(n(p, "index.html"));
+  });
+  win.webContents.on("did-finish-load", () => {
+    win == null ? void 0 : win.webContents.send("main-process-message", (/* @__PURE__ */ new Date()).toLocaleString());
+  });
+  if (VITE_DEV_SERVER_URL) {
+    win.loadURL(VITE_DEV_SERVER_URL);
+    win.webContents.openDevTools();
+  } else {
+    win.loadFile(join(RENDERER_DIST, "index.html"));
+  }
 }
-l.on("window-all-closed", () => {
-  process.platform !== "darwin" && (l.quit(), e = null);
+app.on("window-all-closed", () => {
+  if (process.platform !== "darwin") {
+    app.quit();
+    win = null;
+  }
 });
-l.on("activate", () => {
-  c.getAllWindows().length === 0 && d();
+app.on("activate", () => {
+  if (BrowserWindow.getAllWindows().length === 0) {
+    createWindow();
+  }
 });
-l.whenReady().then(d);
-r.handle("file:save", async (s, t) => {
-  if (!e) return;
-  const i = t.filePath || "untitled.json", o = await f.showSaveDialog(e, {
-    defaultPath: i,
+app.whenReady().then(createWindow);
+ipcMain.handle("file:save", async (event, data) => {
+  if (!win) return;
+  const defaultPath = data.filePath || "untitled.json";
+  const result = await dialog.showSaveDialog(win, {
+    defaultPath,
     title: "Save JSON File",
     filters: [{ name: "JSON Files", extensions: ["json"] }, { name: "All Files", extensions: ["*"] }]
   });
-  return o.filePath ? (await P(o.filePath, t.text, "utf-8"), { filePath: o.filePath }) : null;
+  if (result.filePath) {
+    await writeFile(result.filePath, data.text, "utf-8");
+    return { filePath: result.filePath };
+  }
+  return null;
 });
-r.handle("file:open", async () => {
-  if (!e) return;
-  const s = await f.showOpenDialog(e, {
+ipcMain.handle("file:open", async () => {
+  if (!win) return;
+  const result = await dialog.showOpenDialog(win, {
     title: "Open JSON File",
     properties: ["openFile"],
     filters: [{ name: "JSON Files", extensions: ["json"] }, { name: "All Files", extensions: ["*"] }]
   });
-  if (s.filePaths && s.filePaths.length > 0) {
-    const t = s.filePaths[0], i = await h(t, "utf-8");
+  if (result.filePaths && result.filePaths.length > 0) {
+    const filePath = result.filePaths[0];
+    const content = await readFile(filePath, "utf-8");
     return {
-      filePath: t,
-      text: i
+      filePath,
+      text: content
     };
   }
   return null;
 });
-r.on("window:set-title", (s, t) => {
-  if (e) {
-    const i = "JSONGrid", o = t ? t.split(/[/\\]/).pop() : void 0;
-    e.setTitle(o ? `${o} — ${i}` : i);
+ipcMain.on("window:set-title", (event, filePath) => {
+  if (win) {
+    const baseTitle = "JSONGrid";
+    const fileName = filePath ? filePath.split(/[/\\]/).pop() : void 0;
+    win.setTitle(fileName ? `${fileName} — ${baseTitle}` : baseTitle);
   }
 });
 export {
-  v as MAIN_DIST,
-  p as RENDERER_DIST,
-  a as VITE_DEV_SERVER_URL
+  MAIN_DIST,
+  RENDERER_DIST,
+  VITE_DEV_SERVER_URL
 };
 //# sourceMappingURL=main.js.map
