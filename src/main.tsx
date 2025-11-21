@@ -14,9 +14,13 @@ if (!rootElement) {
     throw new Error("Failed to find the root element with ID 'root'")
 }
 
+import { GridProvider } from './context/GridContext'
+
 const root = ReactDOM.createRoot(rootElement)
 root.render(
     <React.StrictMode>
-        <App />
+        <GridProvider>
+            <App />
+        </GridProvider>
     </React.StrictMode>,
 )

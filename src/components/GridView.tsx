@@ -253,9 +253,9 @@ const GridView = forwardRef<GridViewHandle, Props>(({ data, rowHeight = 34 }, re
                         padding: '8px 12px',
                         borderBottom: '1px solid #f3f4f6',
                         borderRight: '1px solid #f9fafb',
-                        overflow: 'hidden',
                         verticalAlign: 'top',
                         fontSize: 13,
+                        wordBreak: 'break-word'
                       }}
                     >
                       {flexRender(cell.column.columnDef.cell, cell.getContext())}

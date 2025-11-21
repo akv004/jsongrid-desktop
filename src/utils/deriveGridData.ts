@@ -24,6 +24,7 @@ export type DeriveResult = {
   columns: GridColumn[]
   /** JSONPath-like path (e.g., $.data.items) to the array used */
   path: string
+  pathArray: string[]
   /** free-form notes (why this array was selected) */
   note?: string
 }
@@ -266,6 +267,7 @@ export function deriveGridData(text: string): DerivationOutput {
     rows,
     columns,
     path: pathStr,
+    pathArray: best.path,
     note: `Selected array at ${pathStr}; ${best.reason}`,
   }
 

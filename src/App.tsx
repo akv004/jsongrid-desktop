@@ -1,6 +1,7 @@
 import { useEffect, useState, useCallback, useMemo, useRef } from 'react'
 import { Allotment } from 'allotment'
 import 'allotment/dist/style.css'
+import JSON5 from 'json5'
 import {
   FileJson,
   FolderOpen,
@@ -14,6 +15,8 @@ import {
   Minimize,
   Filter
 } from 'lucide-react'
+import { GridProvider } from './context/GridContext'
+import { useGridContext } from './context/GridContext'
 
 import EditorMonaco from './components/EditorMonaco'
 import GridView, { GridViewHandle } from './components/GridView'
@@ -109,13 +112,58 @@ function App() {
   const [filePath, setFilePath] = useState<string>()
   const [fileError, setFileError] = useState<string | null>(null)
   const api = window.api
+  const { triggerExpandAll, triggerCollapseAll, registerEditHandler } = useGridContext()
   const gridRef = useRef<GridViewHandle>(null)
 
   const debouncedText = useDebounce(text, 300)
 
+  /**
+   * Use useMemo to efficiently derive grid data and capture parsing errors.
+   */
   const { data: gridData, error: gridError } = useMemo(() => {
     return deriveGridData(debouncedText)
   }, [debouncedText])
+
+  useEffect(() => {
+    registerEditHandler((relativePath, value) => {
+      if (!gridData) return
+      try {
+        const root = JSON5.parse(text)
+        // gridData.pathArray starts with '$', skip it
+        const basePath = gridData.pathArray[0] === '$' ? gridData.pathArray.slice(1) : gridData.pathArray
+        const fullPath = [...basePath, ...relativePath]
+
+        const setValue = (obj: any, p: (string | number)[], v: any): any => {
+          if (p.length === 0) return v
+          const [head, ...tail] = p
+          const k = head
+
+          const clone = Array.isArray(obj) ? [...obj] : { ...obj }
+
+          if (tail.length === 0) {
+            let finalValue = v
+            const original = obj[k]
+            // Attempt to preserve type
+            if (typeof original === 'number' && !isNaN(Number(v)) && v.trim() !== '') {
+              finalValue = Number(v)
+            } else if (typeof original === 'boolean') {
+              if (v === 'true') finalValue = true
+              if (v === 'false') finalValue = false
+            }
+            clone[k] = finalValue
+          } else {
+            clone[k] = setValue(obj[k] || (typeof tail[0] === 'number' ? [] : {}), tail, v)
+          }
+          return clone
+        }
+
+        const newRoot = setValue(root, fullPath, value)
+        setText(JSON.stringify(newRoot, null, 2))
+      } catch (e) {
+        console.error("Failed to update JSON", e)
+      }
+    })
+  }, [gridData, registerEditHandler, text])
 
   const openFile = useCallback(async (): Promise<void> => {
     try {
@@ -242,25 +290,31 @@ function App() {
                 <span>GRID</span>
               </div>
               <div className="toolbar">
-                <button className="toolbar-btn" disabled>
-                  <Filter size={14} /> Advanced Filter
-                </button>
-                <div className="search-container" style={{ position: 'relative' }}>
-                  <Search size={14} style={{ position: 'absolute', left: 6, top: 6, color: '#9ca3af' }} />
-                  <input
-                    className="search-input"
-                    placeholder="Search..."
-                    style={{ paddingLeft: 24 }}
-                    onChange={(e) => gridRef.current?.setGlobalFilter(e.target.value)}
-                  />
+                <div className="toolbar-group">
+                  <button className="toolbar-btn" disabled>
+                    <Filter size={14} />
+                    Advanced Filter
+                  </button>
+                  <div className="search-container">
+                    <Search size={14} className="search-icon" />
+                    <input
+                      type="text"
+                      placeholder="Search..."
+                      className="search-input"
+                      onChange={(e) => gridRef.current?.setGlobalFilter(e.target.value)}
+                    />
+                  </div>
                 </div>
-                <div style={{ flex: 1 }} />
-                <button className="toolbar-btn" onClick={() => gridRef.current?.expandAll()}>
-                  <Maximize2 size={14} /> Expand All
-                </button>
-                <button className="toolbar-btn" onClick={() => gridRef.current?.collapseAll()}>
-                  <Minimize size={14} /> Collapse All
-                </button>
+                <div className="toolbar-group">
+                  <button className="toolbar-btn" onClick={triggerExpandAll}>
+                    <Maximize2 size={14} />
+                    Expand All
+                  </button>
+                  <button className="toolbar-btn" onClick={triggerCollapseAll}>
+                    <Minimize size={14} />
+                    Collapse All
+                  </button>
+                </div>
               </div>
               <div style={{ flex: 1, overflow: 'hidden', position: 'relative' }}>
                 {gridError ? (

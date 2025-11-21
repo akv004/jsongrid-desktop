@@ -1,50 +1,135 @@
-import React, { useState } from 'react'
-import { ComplexCell, isComplexCell } from '../utils/deriveGridData'
-import { PlusSquare, MinusSquare } from 'lucide-react'
+import React, { useState, useEffect } from 'react'
+import { PlusSquare, MinusSquare, Pencil } from 'lucide-react'
+import { useGridContext } from '../context/GridContext'
+import { ComplexCell } from '../utils/deriveGridData'
 
 type Props = {
     data: unknown
     name?: string
     depth?: number
     isRoot?: boolean
+    path?: (string | number)[]
 }
 
-const NestedGrid: React.FC<Props> = ({ data, name, depth = 0, isRoot = false }) => {
+const NestedGrid: React.FC<Props> = ({ data, name, depth = 0, isRoot = false, path = [] }) => {
+    const { expandAllToken, collapseAllToken, onEditValue } = useGridContext()
     const [isExpanded, setIsExpanded] = useState(false)
     const [isHovered, setIsHovered] = useState(false)
+    const [editValue, setEditValue] = useState<string | null>(null)
 
-    // Determine if the current data is a complex cell (object/array) or a primitive
-    const isComplex = isComplexCell(data)
-    const cellData = isComplex ? (data as ComplexCell) : null
+    // Effect to handle global expand/collapse signals
+    useEffect(() => {
+        if (expandAllToken > 0) setIsExpanded(true)
+    }, [expandAllToken])
 
-    // If it's a primitive value, render it in an input-like box
+    useEffect(() => {
+        if (collapseAllToken > 0) setIsExpanded(false)
+    }, [collapseAllToken])
+
+    // Normalize data: unwrap ComplexCell if present, otherwise use data as is
+    let actualData = data
+    let summary = ''
+    let typeLabel = ''
+    let isComplex = false
+
+    if (data && typeof data === 'object') {
+        if ('type' in data && 'summary' in data && 'data' in data) {
+            // It's a ComplexCell
+            const cell = data as ComplexCell
+            actualData = cell.data
+            summary = cell.summary
+            typeLabel = cell.type === 'array' ? 'Array' : 'Object'
+            isComplex = true
+        } else {
+            // It's a raw object/array
+            isComplex = true
+            if (Array.isArray(data)) {
+                typeLabel = 'Array'
+                summary = `[${(data as any[]).length}]`
+            } else {
+                typeLabel = 'Object'
+                summary = `{${Object.keys(data).length}}`
+            }
+        }
+    }
+
+    // If it's a primitive value, render it in an input box with edit icon
     if (!isComplex) {
+        const strValue = String(actualData ?? '')
+        const displayValue = editValue !== null ? editValue : strValue
+        const isString = typeof actualData === 'string'
+        const color = isString ? '#059669' : (typeof actualData === 'number' || typeof actualData === 'boolean' ? '#d97706' : '#374151')
+
         return (
             <div
-                style={{
-                    padding: '4px 8px',
-                    border: '1px solid #e5e7eb',
-                    borderRadius: 4,
-                    background: 'white',
-                    color: typeof data === 'string' ? '#059669' : '#d97706', // Green for strings, orange for numbers/bools
-                    fontFamily: 'monospace',
-                    fontSize: 12,
-                    minHeight: 24,
-                    display: 'flex',
-                    alignItems: 'center'
-                }}
-                title="Click to edit/copy (Read-only for now)"
+                className="value-cell"
+                style={{ position: 'relative', width: '100%' }}
             >
-                {String(data ?? '')}
+                <input
+                    value={displayValue}
+                    onChange={(e) => setEditValue(e.target.value)}
+                    onBlur={() => {
+                        if (editValue !== null && editValue !== strValue) {
+                            onEditValue(path, editValue)
+                        }
+                        setEditValue(null)
+                    }}
+                    onFocus={(e) => {
+                        e.target.style.background = 'white'
+                        e.target.style.borderColor = '#3b82f6'
+                        setEditValue(strValue)
+                    }}
+                    style={{
+                        width: '100%',
+                        padding: '4px 24px 4px 8px', // Extra padding right for icon
+                        border: '1px solid transparent',
+                        borderRadius: 4,
+                        background: 'transparent',
+                        color: color,
+                        fontFamily: 'monospace',
+                        fontSize: 12,
+                        minHeight: 24,
+                        outline: 'none',
+                        cursor: 'text'
+                    }}
+                    title="Click to edit"
+                />
+                <Pencil
+                    size={12}
+                    className="edit-icon"
+                    style={{
+                        position: 'absolute',
+                        right: 6,
+                        top: '50%',
+                        transform: 'translateY(-50%)',
+                        color: '#9ca3af',
+                        pointerEvents: 'none',
+                        opacity: 0,
+                        transition: 'opacity 0.2s'
+                    }}
+                />
+                <style>{`
+          .value-cell:hover .edit-icon { opacity: 1 !important; }
+          .value-cell input:focus + .edit-icon { opacity: 0 !important; }
+        `}</style>
             </div>
         )
     }
 
-    // If it's complex, render the expander and potentially the nested table
-    const summary = cellData?.summary || ''
-    const typeLabel = cellData?.type === 'array' ? 'Array' : 'Object'
-    const items = cellData?.data as object || {}
-    const keys = Object.keys(items)
+    // Check if it's an array of objects (Smart Table Mode)
+    let isArrayOfObjects = false
+    let allKeys: string[] = []
+
+    if (Array.isArray(actualData)) {
+        const arr = actualData as any[]
+        if (arr.length > 0 && arr.every(item => item && typeof item === 'object' && !Array.isArray(item))) {
+            isArrayOfObjects = true
+            // Collect all unique keys
+            const keySet = new Set<string>()
+            arr.forEach(item => Object.keys(item).forEach(k => keySet.add(k)))
+            allKeys = Array.from(keySet)
+        }
+    }
 
     const handleToggle = (e: React.MouseEvent) => {
         e.stopPropagation()
@@ -77,7 +162,7 @@ const NestedGrid: React.FC<Props> = ({ data, name, depth = 0, isRoot = false }) 
                 </span>
             </div>
 
-            {/* Nested Table */}
+            {/* Nested Content */}
             {isExpanded && (
                 <div style={{
                     marginTop: 4,
@@ -88,34 +173,69 @@ const NestedGrid: React.FC<Props> = ({ data, name, depth = 0, isRoot = false }) 
                     width: '100%',
                     boxShadow: '0 1px 2px rgba(0,0,0,0.05)'
                 }}>
-                    <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: 12 }}>
-                        <tbody>
-                            {keys.map((key, index) => {
-                                const value = (items as any)[key]
-                                return (
-                                    <tr key={key} style={{ borderBottom: index < keys.length - 1 ? '1px solid #e5e7eb' : 'none' }}>
-                                        {/* Key Column */}
-                                        <td style={{
-                                            width: '120px',
-                                            padding: '6px 10px',
-                                            background: '#f9fafb',
-                                            borderRight: '1px solid #e5e7eb',
-                                            color: '#3b82f6',
-                                            fontWeight: 600,
-                                            verticalAlign: 'top',
-                                            fontFamily: 'monospace'
-                                        }}>
-                                            {key}
-                                        </td>
-                                        {/* Value Column */}
-                                        <td style={{ padding: '6px 10px', verticalAlign: 'top' }}>
-                                            <NestedGrid data={value} depth={depth + 1} />
-                                        </td>
+                    {isArrayOfObjects ? (
+                        // Smart Table View for Array of Objects
+                        <div style={{ overflowX: 'auto' }}>
+                            <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: 12 }}>
+                                <thead>
+                                    <tr style={{ background: '#f3f4f6', borderBottom: '1px solid #e5e7eb' }}>
+                                        <th style={{ padding: '6px 10px', textAlign: 'left', color: '#6b7280', width: 40, borderRight: '1px solid #e5e7eb' }}>#</th>
+                                        {allKeys.map(key => (
+                                            <th key={key} style={{ padding: '6px 10px', textAlign: 'left', color: '#374151', fontWeight: 600, borderRight: '1px solid #e5e7eb' }}>
+                                                {key}
+                                            </th>
+                                        ))}
                                     </tr>
-                                )
-                            })}
-                        </tbody>
-                    </table>
+                                </thead>
+                                <tbody>
+                                    {(actualData as any[]).map((item, index) => (
+                                        <tr key={index} style={{ borderBottom: index < (actualData as any[]).length - 1 ? '1px solid #e5e7eb' : 'none' }}>
+                                            <td style={{ padding: '6px 10px', color: '#9ca3af', borderRight: '1px solid #e5e7eb', fontFamily: 'monospace' }}>
+                                                {index}
+                                            </td>
+                                            {allKeys.map(key => (
+                                                <td key={key} style={{ padding: '0', borderRight: '1px solid #e5e7eb', verticalAlign: 'top' }}>
+                                                    <div style={{ padding: '2px' }}>
+                                                        <NestedGrid data={item[key]} depth={depth + 1} path={[...path, index, key]} />
+                                                    </div>
+                                                </td>
+                                            ))}
+                                        </tr>
+                                    ))}
+                                </tbody>
+                            </table>
+                        </div>
+                    ) : (
+                        // Standard Key-Value View
+                        <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: 12 }}>
+                            <tbody>
+                                {Object.keys(actualData as object).map((key, index, arr) => {
+                                    const value = (actualData as any)[key]
+                                    return (
+                                        <tr key={key} style={{ borderBottom: index < arr.length - 1 ? '1px solid #e5e7eb' : 'none' }}>
+                                            <td style={{
+                                                width: '120px',
+                                                padding: '6px 10px',
+                                                background: '#f9fafb',
+                                                borderRight: '1px solid #e5e7eb',
+                                                color: '#3b82f6',
+                                                fontWeight: 600,
+                                                verticalAlign: 'top',
+                                                fontFamily: 'monospace'
+                                            }}>
+                                                {key}
+                                            </td>
+                                            <td style={{ padding: '0', verticalAlign: 'top' }}>
+                                                <div style={{ padding: '2px' }}>
+                                                    <NestedGrid data={value} depth={depth + 1} path={[...path, key]} />
+                                                </div>
+                                            </td>
+                                        </tr>
+                                    )
+                                })}
+                            </tbody>
+                        </table>
+                    )}
                 </div>
             )}
         </div>
