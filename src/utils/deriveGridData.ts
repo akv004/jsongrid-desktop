@@ -107,8 +107,8 @@ function scoreArray(arr: unknown[]): { score: number; reason: string; keys: stri
   }
 
   const keys = Array.from(keyFreq.entries())
-      .filter(([, n]) => n >= Math.ceil(sampleCount * 0.4))
-      .map(([k]) => k)
+    .filter(([, n]) => n >= Math.ceil(sampleCount * 0.4))
+    .map(([k]) => k)
 
   const ratio = objectCount / sampleCount
   const score = ratio * 70 + keys.length * 5 + Math.log10(arr.length + 1) * 10
@@ -149,14 +149,25 @@ function inferType(v: unknown): GridColumn['type'] {
   return 'object'
 }
 
+export type ComplexCell = {
+  type: 'object' | 'array'
+  summary: string
+  itemCount?: number
+  data: unknown
+}
+
+export function isComplexCell(v: unknown): v is ComplexCell {
+  return !!v && typeof v === 'object' && 'summary' in v && 'data' in v && ('type' in v && (v.type === 'object' || v.type === 'array'))
+}
+
 /** Convert nested structures to short printable strings for grid cells */
 function toCell(v: unknown): unknown {
   const t = inferType(v)
   if (t === 'object') {
-    return v ? 'Object' : 'null'
+    return { type: 'object', summary: '{}', itemCount: Object.keys(v as object).length, data: v } as ComplexCell
   }
   if (t === 'array') {
-    return `Array(${(v as any[]).length})`
+    return { type: 'array', summary: '[]', itemCount: (v as any[]).length, data: v } as ComplexCell
   }
   return v
 }

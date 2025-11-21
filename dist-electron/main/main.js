@@ -1,52 +1,65 @@
-import { app, BrowserWindow, ipcMain, dialog } from "electron";
-import { dirname, join } from "node:path";
-import { fileURLToPath } from "node:url";
-import { readFile, writeFile } from "node:fs/promises";
-const __filename = fileURLToPath(import.meta.url);
-const __dirname = dirname(__filename);
-async function createWindow() {
-  const win = new BrowserWindow({
-    width: 1280,
-    height: 800,
+import { app as l, BrowserWindow as c, ipcMain as r, dialog as f } from "electron";
+import { dirname as m, join as n } from "node:path";
+import { fileURLToPath as w } from "node:url";
+import { writeFile as P, readFile as h } from "node:fs/promises";
+const u = w(import.meta.url), _ = m(u);
+process.env.APP_ROOT = n(_, "../..");
+const a = process.env.VITE_DEV_SERVER_URL, v = n(process.env.APP_ROOT, "dist-electron"), p = n(process.env.APP_ROOT, "dist");
+process.env.VITE_PUBLIC = a ? n(process.env.APP_ROOT, "public") : p;
+let e;
+function d() {
+  e = new c({
+    // FIX: Set a default title for the window.
+    title: "JSONGrid",
+    icon: n(process.env.VITE_PUBLIC, "electron-vite.svg"),
     webPreferences: {
-      // This path will now be correctly resolved
-      preload: join(__dirname, "../preload/preload.js"),
-      contextIsolation: true,
-      nodeIntegration: false,
-      sandbox: true
+      preload: n(v, "preload.cjs")
     }
-  });
-  if (!app.isPackaged) {
-    await win.loadURL(process.env.VITE_DEV_SERVER_URL);
-    win.webContents.openDevTools();
-  } else {
-    await win.loadFile(join(__dirname, "../../dist/index.html"));
-  }
+  }), e.webContents.on("did-finish-load", () => {
+    e == null || e.webContents.send("main-process-message", (/* @__PURE__ */ new Date()).toLocaleString());
+  }), a ? (e.loadURL(a), e.webContents.openDevTools()) : e.loadFile(n(p, "index.html"));
 }
-app.whenReady().then(createWindow).catch((e) => console.error("Failed to create window:", e));
-app.on("window-all-closed", () => {
-  if (process.platform !== "darwin") app.quit();
+l.on("window-all-closed", () => {
+  process.platform !== "darwin" && (l.quit(), e = null);
 });
-app.on("activate", () => {
-  if (BrowserWindow.getAllWindows().length === 0) createWindow();
+l.on("activate", () => {
+  c.getAllWindows().length === 0 && d();
 });
-ipcMain.handle("file:open", async () => {
-  const { canceled, filePaths } = await dialog.showOpenDialog({
-    filters: [{ name: "JSON", extensions: ["json", "jsonl"] }],
-    properties: ["openFile"]
+l.whenReady().then(d);
+r.handle("file:save", async (s, t) => {
+  if (!e) return;
+  const i = t.filePath || "untitled.json", o = await f.showSaveDialog(e, {
+    defaultPath: i,
+    title: "Save JSON File",
+    filters: [{ name: "JSON Files", extensions: ["json"] }, { name: "All Files", extensions: ["*"] }]
   });
-  if (canceled || !filePaths[0]) return null;
-  const text = await readFile(filePaths[0], "utf-8");
-  return { filePath: filePaths[0], text };
+  return o.filePath ? (await P(o.filePath, t.text, "utf-8"), { filePath: o.filePath }) : null;
 });
-ipcMain.handle("file:save", async (_e, p) => {
-  let filePath = p.filePath;
-  if (!filePath) {
-    const res = await dialog.showSaveDialog({ filters: [{ name: "JSON", extensions: ["json"] }] });
-    if (res.canceled || !res.filePath) return null;
-    filePath = res.filePath;
+r.handle("file:open", async () => {
+  if (!e) return;
+  const s = await f.showOpenDialog(e, {
+    title: "Open JSON File",
+    properties: ["openFile"],
+    filters: [{ name: "JSON Files", extensions: ["json"] }, { name: "All Files", extensions: ["*"] }]
+  });
+  if (s.filePaths && s.filePaths.length > 0) {
+    const t = s.filePaths[0], i = await h(t, "utf-8");
+    return {
+      filePath: t,
+      text: i
+    };
   }
-  await writeFile(filePath, p.text, "utf-8");
-  return { filePath };
+  return null;
 });
+r.on("window:set-title", (s, t) => {
+  if (e) {
+    const i = "JSONGrid", o = t ? t.split(/[/\\]/).pop() : void 0;
+    e.setTitle(o ? `${o} — ${i}` : i);
+  }
+});
+export {
+  v as MAIN_DIST,
+  p as RENDERER_DIST,
+  a as VITE_DEV_SERVER_URL
+};
 //# sourceMappingURL=main.js.map

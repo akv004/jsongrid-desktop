@@ -1,44 +1,118 @@
-import { useEffect, useState, useCallback, useMemo } from 'react'
+import { useEffect, useState, useCallback, useMemo, useRef } from 'react'
 import { Allotment } from 'allotment'
-import 'allotment/dist/style.css' // Import the CSS for Allotment
+import 'allotment/dist/style.css'
+import {
+  FileJson,
+  FolderOpen,
+  Save,
+  Play,
+  Minimize2,
+  CheckCircle,
+  Trash2,
+  Search,
+  Maximize2,
+  Minimize,
+  Filter
+} from 'lucide-react'
 
 import EditorMonaco from './components/EditorMonaco'
-import GridView from './components/GridView'
+import GridView, { GridViewHandle } from './components/GridView'
 import { deriveGridData } from './utils/deriveGridData'
 import { useDebounce } from '@/hooks/useDebounce'
+import './App.css'
 
 const initialJson = `[
-  { 
-    "id": 1, 
-    "name": "Alice", 
-    "active": true, 
-    "email": "alice@example.com",
-    "profile": {
-      "age": 30,
-      "roles": ["admin", "editor"]
-    }
-  },
-  { "id": 2, "name": "Bob",   "active": false, "email": "bob@example.com" },
-  { "id": 3, "name": "Charlie", "active": true, "email": "charlie@example.com" }
+	{
+		"_id": "65ce58753546634a0dceb369",
+		"guid": "7eac8b2b-6d0d-47b6-9370-e8ee5d95421c",
+		"isActive": true,
+		"tags": {
+			"item": "et",
+			"value": {
+				"company": "Filodyne"
+			}
+		},
+		"balance": "$2,839.71",
+		"picture": "http://placehold.it/32x32",
+		"age": 35,
+		"eye Color": "brown",
+		"name": "Hartman Tyler",
+		"gender": "male",
+		"company": "COGENTRY",
+		"email": "hartmantyler@cogentry.com",
+		"phone": "+1 (843) 467-2321",
+		"friends": [
+			{
+				"id": 0,
+				"name": "Anastasia Mclean"
+			},
+			{
+				"id": 1,
+				"name": "Douglas Marshall"
+			},
+			{
+				"id": 2,
+				"name": "Chris Stone"
+			}
+		],
+		"address": "494 Gain Court, Wilmington, Guam, 9348",
+		"registered": "2018-07-22T10:00:39 +04:00",
+		"latitude": -37.13536,
+		"longitude": -116.583092,
+		"greeting": "Hello, Hartman Tyler! You have 1 unread messages.",
+		"favoriteFruit": "strawberry"
+	},
+	{
+		"_id": "65ce587519ec6121a04ba950",
+		"guid": "eb5afd03-c2fb-4344-9507-f71541593a15",
+		"isActive": false,
+		"tags": {
+			"item": "est",
+			"value": {
+				"company": "Affluex"
+			}
+		},
+		"balance": "$1,442.27",
+		"picture": "http://placehold.it/32x32",
+		"age": 35,
+		"eye Color": "green",
+		"name": "Malinda Jarvis",
+		"gender": "female",
+		"company": "OVATION",
+		"email": "malindajarvis@ovation.com",
+		"phone": "+1 (994) 436-2250",
+		"friends": [
+			{
+				"id": 0,
+				"name": "Carmella Cleveland"
+			},
+			{
+				"id": 1,
+				"name": "Mariana Moody"
+			},
+			{
+				"id": 2,
+				"name": "Marcia Tillman"
+			}
+		],
+		"address": "810 Lawn Court, Yettem, Mississippi, 8470",
+		"registered": "2014-06-30T01:51:15 +04:00",
+		"latitude": 78.030851,
+		"longitude": -135.193892,
+		"greeting": "Hello, Malinda Jarvis! You have 10 unread messages.",
+		"favoriteFruit": "banana"
+	}
 ]`
 
-/**
- * @name App
- * @description The root component of the application, orchestrating the editor, grid view, and file operations.
- */
 function App() {
-  // This state updates immediately on every keystroke, keeping the editor responsive.
   const [text, setText] = useState(initialJson)
   const [filePath, setFilePath] = useState<string>()
   const [fileError, setFileError] = useState<string | null>(null)
   const api = window.api
+  const gridRef = useRef<GridViewHandle>(null)
 
-  // This debounced value will only update 300ms after the user stops typing.
   const debouncedText = useDebounce(text, 300)
 
-  /**
-   * Use useMemo to efficiently derive grid data and capture parsing errors.
-   */
   const { data: gridData, error: gridError } = useMemo(() => {
     return deriveGridData(debouncedText)
   }, [debouncedText])
@@ -59,13 +133,34 @@ function App() {
   const saveFile = useCallback(async (): Promise<void> => {
     try {
       setFileError(null)
-      // When saving, always use the most up-to-date text, not the debounced version.
       const res = await api?.saveFile({ filePath, text })
       if (res?.filePath) setFilePath(res.filePath)
     } catch (e) {
       setFileError(e instanceof Error ? e.message : String(e))
     }
   }, [api, filePath, text])
+
+  const handleFormat = () => {
+    try {
+      const parsed = JSON.parse(text)
+      setText(JSON.stringify(parsed, null, 2))
+    } catch (e) {
+      // ignore error
+    }
+  }
+
+  const handleMinify = () => {
+    try {
+      const parsed = JSON.parse(text)
+      setText(JSON.stringify(parsed))
+    } catch (e) {
+      // ignore error
+    }
+  }
+
+  const handleClear = () => {
+    setText('')
+  }
 
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
@@ -82,64 +177,106 @@ function App() {
     return () => window.removeEventListener('keydown', onKey)
   }, [openFile, saveFile])
 
-  useEffect(() => {
-    if (api?.setTitle) {
-      api.setTitle(filePath)
-    }
-  }, [api, filePath])
+
 
   return (
-      // ✅ FIX: Use `height: 100%` to inherit from the now-fixed root elements.
-      <div style={{ height: '100%', boxSizing: 'border-box', display: 'flex', flexDirection: 'column', padding: 16, gap: 8 }}>
-        {/* Header section: does not grow or shrink. */}
-        <div style={{ flexShrink: 0 }}>
-          <h1 style={{ marginTop: 0, marginBottom: 8 }}>JSONGrid Desktop</h1>
-          <div style={{ display: 'flex', gap: 8, alignItems: 'center' }}>
-            <button onClick={openFile} disabled={!api}>
-              Open (⌘/Ctrl+O)
-            </button>
-            <button onClick={saveFile} disabled={!api}>
-              Save (⌘/Ctrl+S)
-            </button>
-            <span style={{ marginLeft: 16, color: '#555', fontFamily: 'monospace' }}>
-            {filePath ? filePath : '(untitled)'}
-          </span>
-            {(fileError || gridError) && (
-                <span
-                    title={fileError || gridError || ''}
-                    style={{ marginLeft: 16, color: '#b00020', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', flexShrink: 1 }}
-                >
-              {fileError || gridError}
+    <div className="app-container">
+      {/* Header */}
+      <header className="app-header">
+        <div className="app-title">
+          <FileJson size={20} />
+          <span>JSONGrid Desktop</span>
+        </div>
+        <div className="header-actions">
+          <button className="btn-secondary" onClick={openFile} disabled={!api} title="Open (⌘/Ctrl+O)">
+            <FolderOpen size={16} /> Open
+          </button>
+          <button className="btn-primary" onClick={saveFile} disabled={!api} title="Save (⌘/Ctrl+S)">
+            <Save size={16} /> Save
+          </button>
+          {filePath && (
+            <span style={{ marginLeft: 8, fontSize: 12, opacity: 0.8 }}>
+              {filePath}
             </span>
-            )}
-          </div>
+          )}
         </div>
+      </header>
 
-        {/* ✅ FIX: Use a robust relative/absolute positioning strategy to guarantee the content area fills the available space. */}
-        <div style={{ flex: '1 1 auto', minHeight: 0, position: 'relative' }}>
-          <div style={{ position: 'absolute', top: 0, left: 0, right: 0, bottom: 0 }}>
-            <Allotment>
-              <Allotment.Pane>
-                <div style={{ height: '100%', border: '1px solid #ddd', borderRadius: 6, overflow: 'hidden' }}>
-                  <EditorMonaco value={text} onChange={setText} />
+      {/* Main Content */}
+      <div className="main-content">
+        <Allotment>
+          <Allotment.Pane minSize={300}>
+            <div className="panel-container">
+              <div className="panel-header">
+                <span>JSON</span>
+                {fileError && <span style={{ color: '#fca5a5', fontSize: 12 }}>{fileError}</span>}
+              </div>
+              <div className="toolbar">
+                <button className="toolbar-btn" onClick={() => setText(initialJson)}>
+                  <FileJson size={14} /> Sample
+                </button>
+                <button className="toolbar-btn" onClick={handleFormat}>
+                  <Play size={14} /> Format
+                </button>
+                <button className="toolbar-btn" onClick={handleMinify}>
+                  <Minimize2 size={14} /> Minify
+                </button>
+                {/* Validate is implicit with Monaco, but we could add explicit check */}
+                <button className="toolbar-btn" title="Validation is automatic">
+                  <CheckCircle size={14} /> Validate
+                </button>
+                <div style={{ flex: 1 }} />
+                <button className="toolbar-btn danger" onClick={handleClear}>
+                  <Trash2 size={14} /> Clear
+                </button>
+              </div>
+              <div style={{ flex: 1, overflow: 'hidden' }}>
+                <EditorMonaco value={text} onChange={setText} />
+              </div>
+            </div>
+          </Allotment.Pane>
+
+          <Allotment.Pane minSize={300}>
+            <div className="panel-container">
+              <div className="panel-header">
+                <span>GRID</span>
+              </div>
+              <div className="toolbar">
+                <button className="toolbar-btn" disabled>
+                  <Filter size={14} /> Advanced Filter
+                </button>
+                <div className="search-container" style={{ position: 'relative' }}>
+                  <Search size={14} style={{ position: 'absolute', left: 6, top: 6, color: '#9ca3af' }} />
+                  <input
+                    className="search-input"
+                    placeholder="Search..."
+                    style={{ paddingLeft: 24 }}
+                    onChange={(e) => gridRef.current?.setGlobalFilter(e.target.value)}
+                  />
                 </div>
-              </Allotment.Pane>
-              <Allotment.Pane>
-                <div style={{ height: '100%', border: '1px solid #ddd', borderRadius: 6, overflow: 'hidden' }}>
-                  {gridError ? (
-                      <div style={{ padding: 12, color: '#b00020', fontFamily: 'monospace' }}>
-                        <strong style={{ display: 'block', marginBottom: '8px' }}>Error Parsing Input</strong>
-                        <div>{gridError}</div>
-                      </div>
-                  ) : (
-                      <GridView data={gridData} />
-                  )}
-                </div>
-              </Allotment.Pane>
-            </Allotment>
-          </div>
-        </div>
+                <div style={{ flex: 1 }} />
+                <button className="toolbar-btn" onClick={() => gridRef.current?.expandAll()}>
+                  <Maximize2 size={14} /> Expand All
+                </button>
+                <button className="toolbar-btn" onClick={() => gridRef.current?.collapseAll()}>
+                  <Minimize size={14} /> Collapse All
+                </button>
+              </div>
+              <div style={{ flex: 1, overflow: 'hidden', position: 'relative' }}>
+                {gridError ? (
+                  <div style={{ padding: 20, color: '#dc2626' }}>
+                    <strong>Error Parsing Input</strong>
+                    <p>{gridError}</p>
+                  </div>
+                ) : (
+                  <GridView ref={gridRef} data={gridData} />
+                )}
+              </div>
+            </div>
+          </Allotment.Pane>
+        </Allotment>
       </div>
+    </div>
   )
 }
 
