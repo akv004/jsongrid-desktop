@@ -323,7 +323,11 @@ function App() {
                     <p>{gridError}</p>
                   </div>
                 ) : (
-                  <GridView ref={gridRef} data={gridData} />
+                  <GridView
+                    ref={gridRef}
+                    data={gridData}
+                    key={`${gridData?.path}-${gridData?.columns.length}`}
+                  />
                 )}
               </div>
             </div>

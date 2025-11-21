@@ -7,7 +7,7 @@
 # JSONGrid Desktop (Electron + Vite + React)
 
 A small desktop app to **view/edit JSON** on the left (Monaco editor) and show a **Grid** on the right (TanStack Table) by auto‑detecting the best array in your JSON.
-want to replicate similar function what https://jsongrid.com/json-grid server here. 
+ 
 ---
 
 ## Why this README matters

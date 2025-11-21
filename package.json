@@ -2,7 +2,7 @@
   "name": "jsongrid-desktop",
   "private": true,
   "version": "0.0.0",
-  "author": "Amit Verma <akv004@gmail.com>",
+  "author": "Amit Verma",
   "type": "module",
   "main": "dist-electron/main/main.js",
   "scripts": {
