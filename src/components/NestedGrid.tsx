@@ -197,43 +197,42 @@ const NestedGrid: React.FC<Props> = ({ data, name, depth = 0, isRoot = false, pa
                     overflow: 'hidden',
                     background: 'white',
                     width: '100%',
-                    boxShadow: '0 1px 2px rgba(0,0,0,0.05)'
+                    boxShadow: '0 1px 2px rgba(0,0,0,0.05)',
+                    overflowX: 'auto'
                 }}>
                     {isArrayOfObjects ? (
                         // Smart Table View for Array of Objects
-                        <div style={{ overflowX: 'auto' }}>
-                            <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: 12 }}>
-                                <thead>
-                                    <tr style={{ background: '#f3f4f6', borderBottom: '1px solid #e5e7eb' }}>
-                                        <th style={{ padding: '6px 10px', textAlign: 'left', color: '#6b7280', width: 40, borderRight: '1px solid #e5e7eb' }}>#</th>
+                        <table style={{ width: 'max-content', minWidth: '100%', borderCollapse: 'collapse', fontSize: 12 }}>
+                            <thead>
+                                <tr style={{ background: '#f3f4f6', borderBottom: '1px solid #e5e7eb' }}>
+                                    <th style={{ padding: '6px 10px', textAlign: 'left', color: '#6b7280', width: 40, borderRight: '1px solid #e5e7eb', whiteSpace: 'nowrap' }}>#</th>
+                                    {allKeys.map(key => (
+                                        <th key={key} style={{ padding: '6px 10px', textAlign: 'left', color: '#374151', fontWeight: 600, borderRight: '1px solid #e5e7eb', whiteSpace: 'nowrap' }}>
+                                            {key}
+                                        </th>
+                                    ))}
+                                </tr>
+                            </thead>
+                            <tbody>
+                                {(actualData as any[]).map((item, index) => (
+                                    <tr key={index} style={{ borderBottom: index < (actualData as any[]).length - 1 ? '1px solid #e5e7eb' : 'none' }}>
+                                        <td style={{ padding: '6px 10px', color: '#9ca3af', borderRight: '1px solid #e5e7eb', fontFamily: 'monospace' }}>
+                                            {index}
+                                        </td>
                                         {allKeys.map(key => (
-                                            <th key={key} style={{ padding: '6px 10px', textAlign: 'left', color: '#374151', fontWeight: 600, borderRight: '1px solid #e5e7eb' }}>
-                                                {key}
-                                            </th>
+                                            <td key={key} style={{ padding: '0', borderRight: '1px solid #e5e7eb', verticalAlign: 'top', maxWidth: '400px' }}>
+                                                <div style={{ padding: '2px' }}>
+                                                    <NestedGrid data={item[key]} depth={depth + 1} path={[...path, index, key]} />
+                                                </div>
+                                            </td>
                                         ))}
                                     </tr>
-                                </thead>
-                                <tbody>
-                                    {(actualData as any[]).map((item, index) => (
-                                        <tr key={index} style={{ borderBottom: index < (actualData as any[]).length - 1 ? '1px solid #e5e7eb' : 'none' }}>
-                                            <td style={{ padding: '6px 10px', color: '#9ca3af', borderRight: '1px solid #e5e7eb', fontFamily: 'monospace' }}>
-                                                {index}
-                                            </td>
-                                            {allKeys.map(key => (
-                                                <td key={key} style={{ padding: '0', borderRight: '1px solid #e5e7eb', verticalAlign: 'top' }}>
-                                                    <div style={{ padding: '2px' }}>
-                                                        <NestedGrid data={item[key]} depth={depth + 1} path={[...path, index, key]} />
-                                                    </div>
-                                                </td>
-                                            ))}
-                                        </tr>
-                                    ))}
-                                </tbody>
-                            </table>
-                        </div>
+                                ))}
+                            </tbody>
+                        </table>
                     ) : (
                         // Standard Key-Value View
-                        <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: 12 }}>
+                        <table style={{ width: 'max-content', minWidth: '100%', borderCollapse: 'collapse', fontSize: 12 }}>
                             <tbody>
                                 {Object.keys(actualData as object).map((key, index, arr) => {
                                     const value = (actualData as any)[key]
@@ -247,7 +246,8 @@ const NestedGrid: React.FC<Props> = ({ data, name, depth = 0, isRoot = false, pa
                                                 color: '#3b82f6',
                                                 fontWeight: 600,
                                                 verticalAlign: 'top',
-                                                fontFamily: 'monospace'
+                                                fontFamily: 'monospace',
+                                                whiteSpace: 'nowrap'
                                             }}>
                                                 {key}
                                             </td>
