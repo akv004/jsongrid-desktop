@@ -15,6 +15,7 @@ const NestedGrid: React.FC<Props> = ({ data, name, depth = 0, isRoot = false, pa
     const { expandAllToken, collapseAllToken, onEditValue } = useGridContext()
     const [isExpanded, setIsExpanded] = useState(false)
     const [isHovered, setIsHovered] = useState(false)
+    const [isEditing, setIsEditing] = useState(false)
     const [editValue, setEditValue] = useState<string | null>(null)
 
     // Effect to handle global expand/collapse signals
@@ -60,58 +61,83 @@ const NestedGrid: React.FC<Props> = ({ data, name, depth = 0, isRoot = false, pa
         const isString = typeof actualData === 'string'
         const color = isString ? '#059669' : (typeof actualData === 'number' || typeof actualData === 'boolean' ? '#d97706' : '#374151')
 
+        if (isEditing) {
+            return (
+                <div className="value-cell-edit" style={{ width: '100%', padding: '2px' }}>
+                    <input
+                        autoFocus
+                        value={displayValue}
+                        onChange={(e) => setEditValue(e.target.value)}
+                        onBlur={() => {
+                            if (editValue !== null && editValue !== strValue) {
+                                onEditValue(path, editValue)
+                            }
+                            setIsEditing(false)
+                            setEditValue(null)
+                        }}
+                        onKeyDown={(e) => {
+                            if (e.key === 'Enter') {
+                                e.currentTarget.blur()
+                            } else if (e.key === 'Escape') {
+                                setEditValue(null)
+                                setIsEditing(false)
+                            }
+                        }}
+                        style={{
+                            width: '100%',
+                            padding: '2px 4px',
+                            border: '1px solid #3b82f6',
+                            borderRadius: 4,
+                            outline: 'none',
+                            fontFamily: 'monospace',
+                            fontSize: 12,
+                            background: 'white',
+                            color: '#1f2937'
+                        }}
+                    />
+                </div>
+            )
+        }
+
         return (
             <div
-                className="value-cell"
-                style={{ position: 'relative', width: '100%' }}
+                className="value-cell-view"
+                onClick={() => {
+                    setEditValue(strValue)
+                    setIsEditing(true)
+                }}
+                style={{
+                    display: 'flex',
+                    alignItems: 'center',
+                    gap: 6,
+                    cursor: 'pointer',
+                    padding: '4px 8px',
+                    minHeight: 24,
+                    width: 'fit-content',
+                    maxWidth: '100%'
+                }}
             >
-                <input
-                    value={displayValue}
-                    onChange={(e) => setEditValue(e.target.value)}
-                    onBlur={() => {
-                        if (editValue !== null && editValue !== strValue) {
-                            onEditValue(path, editValue)
-                        }
-                        setEditValue(null)
-                    }}
-                    onFocus={(e) => {
-                        e.target.style.background = 'white'
-                        e.target.style.borderColor = '#3b82f6'
-                        setEditValue(strValue)
-                    }}
-                    style={{
-                        width: '100%',
-                        padding: '4px 24px 4px 8px', // Extra padding right for icon
-                        border: '1px solid transparent',
-                        borderRadius: 4,
-                        background: 'transparent',
-                        color: color,
-                        fontFamily: 'monospace',
-                        fontSize: 12,
-                        minHeight: 24,
-                        outline: 'none',
-                        cursor: 'text'
-                    }}
-                    title="Click to edit"
-                />
+                <span style={{
+                    color,
+                    fontFamily: 'monospace',
+                    fontSize: 12,
+                    wordBreak: 'break-word'
+                }}>
+                    {strValue}
+                </span>
                 <Pencil
                     size={12}
                     className="edit-icon"
                     style={{
-                        position: 'absolute',
-                        right: 6,
-                        top: '50%',
-                        transform: 'translateY(-50%)',
                         color: '#9ca3af',
-                        pointerEvents: 'none',
                         opacity: 0,
-                        transition: 'opacity 0.2s'
+                        transition: 'opacity 0.2s',
+                        flexShrink: 0
                     }}
                 />
                 <style>{`
-          .value-cell:hover .edit-icon { opacity: 1 !important; }
-          .value-cell input:focus + .edit-icon { opacity: 0 !important; }
-        `}</style>
+                    .value-cell-view:hover .edit-icon { opacity: 1 !important; }
+                `}</style>
             </div>
         )
     }
