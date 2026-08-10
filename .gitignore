@@ -39,3 +39,9 @@ node_modules/
 *.njsproj
 *.sln
 *.sw?
+# Tauri
+src-tauri/target/
+src-tauri/gen/schemas/
+
+# Local Claude session memory (not for public repo)
+.claude/

@@ -1,26 +1,15 @@
-// src/main.tsx
 import React from 'react'
 import ReactDOM from 'react-dom/client'
 import App from './App'
-import './index.css' // ✅ CRITICAL: Import the global styles to apply the full-height fix.
+import './index.css'
 
-/**
- * @name main
- * @description The main entry point for the React renderer process.
- * It finds the 'root' DOM element and renders the main App component into it.
- */
 const rootElement = document.getElementById('root')
 if (!rootElement) {
-    throw new Error("Failed to find the root element with ID 'root'")
+  throw new Error("Failed to find the root element with ID 'root'")
 }
 
-import { GridProvider } from './context/GridContext'
-
-const root = ReactDOM.createRoot(rootElement)
-root.render(
-    <React.StrictMode>
-        <GridProvider>
-            <App />
-        </GridProvider>
-    </React.StrictMode>,
+ReactDOM.createRoot(rootElement).render(
+  <React.StrictMode>
+    <App />
+  </React.StrictMode>,
 )
