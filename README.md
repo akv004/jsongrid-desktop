@@ -1,39 +1,48 @@
-# React + TypeScript + Vite
+# JSONGrid Desktop (Tauri 2 + React 19)
 
+A desktop app to **view/edit JSON** on the left (Monaco editor) and explore it as a **grid**
+on the right (TanStack Table + Virtual). The grid auto-detects the best array of records
+anywhere in the JSON (tolerant parsing: JSON5 and JSONL supported).
 
-
-
-
-# JSONGrid Desktop (Electron + Vite + React)
-
-A small desktop app to **view/edit JSON** on the left (Monaco editor) and show a **Grid** on the right (TanStack Table) by auto‑detecting the best array in your JSON.
- 
----
-
-## Why this README matters
-Some Electron setups silently break when the **preload** script is emitted as ESM. This README documents the **correct CommonJS preload** and points to the exact places to edit if you see errors like:
-
-```
-SyntaxError: Cannot use import statement outside a module
-Unable to load preload script: .../dist-electron/preload/preload.js
-```
+Built with **Tauri 2** (Rust shell, ~10 MB installer) — migrated from Electron; the last
+Electron state is tagged `v0.1.2-electron-final`.
 
 ---
 
-## Project layout (key files)
+## Features
+
+- Monaco JSON editor with format / minify / validate / clear
+- Auto-derived grid: best array selection, column inference, path display (`$[0].tags`)
+- Virtualized rows (handles large arrays), sorting, global search, column resize
+- **Nested objects/arrays**: cells show a compact `Object {n}` / `Array [n]` chip; clicking
+  opens a **full-width detail panel beneath the row** — readable at any column width,
+  sticky-left while scrolling horizontally, nested tables expand inline inside it
+- **Inline editing**: click any primitive value (in cells or detail panels); edits are
+  written back to the exact JSON path in the editor
+- Expand All / Collapse All, CSV export
+- File open/save via native dialogs, Ctrl/Cmd+O and Ctrl/Cmd+S, window title tracks file
+
+---
+
+## Project layout
 
 ```
-electron/
-  main/main.ts                 # Electron main process (window, IPC)
-  preload/preload.cjs          # ✅ CommonJS preload (contextBridge -> window.api)
-  typings/ipc.ts               # Global TS types for window.api (optional)
+src-tauri/                     # Rust shell (Tauri 2) — no custom commands, plugins only
+  tauri.conf.json              # window, bundle, dev/build commands
+  capabilities/default.json    # dialog + fs + set-title permissions
 src/
-  components/EditorMonaco.tsx  # Monaco JSON editor
-  components/GridView.tsx      # Grid (TanStack Table + react-virtual)
-  App.tsx                      # UI wiring (Open/Save/Format + Grid)
-vite.config.ts                 # Vite + vite-plugin-electron config
-package.json                   # scripts, electron-builder targets
+  lib/                         # ★ Reusable, platform-free React components
+    JsonGridWorkspace.tsx      #   Editor + grid dual pane (drop into any React app)
+    components/                #   GridView, NestedGrid, EditorMonaco
+    context/GridContext.tsx    #   Expand/collapse tokens + edit dispatch
+    utils/deriveGridData.ts    #   JSON → grid derivation (tolerant parsing)
+    index.ts                   #   Barrel export — see src/lib/README.md for reuse docs
+  platform/fileHost.ts         # FileHost interface: Tauri impl + browser fallback
+  App.tsx                      # Thin shell: header, open/save, shortcuts, title
 ```
+
+Everything under `src/lib/` must stay free of Tauri/Node imports — it is designed to be
+reused in other React projects (see `src/lib/README.md` for peer deps and usage).
 
 ---
 
@@ -41,117 +50,38 @@ package.json                   # scripts, electron-builder targets
 
 ```bash
 pnpm install
-pnpm dev      # starts Vite + Electron (via vite-plugin-electron)
-pnpm build    # builds renderer + electron bundles; then electron-builder
+pnpm dev        # tauri dev: Vite + Rust shell + native window
+pnpm dev:web    # Vite only — runs in a browser with file-input/download fallback
+pnpm build      # tauri build: production bundles (deb/rpm/AppImage on Linux)
+pnpm typecheck
+pnpm lint
 ```
+
+Linux build deps: Rust toolchain + `libwebkit2gtk-4.1-dev` (standard Tauri 2 prerequisites).
 
 ---
 
-## Preload: the **only** correct pattern (CommonJS)
+## Architecture notes
 
-**Do not** use `import`/ESM in preload. Electron loads the file by path and expects CJS.
-
-**electron/preload/preload.cjs**
-```js
-/* eslint-disable @typescript-eslint/no-require-imports */
-'use strict';
-const { contextBridge, ipcRenderer } = require('electron');
-console.log('[JSONGRID] ✅ preload.cjs loaded');
-
-contextBridge.exposeInMainWorld('api', {
-  openFile: () => ipcRenderer.invoke('file:open'),
-  saveFile: (data) => ipcRenderer.invoke('file:save', data),
-});
-```
-
-**electron/main/main.ts** (point to **.cjs**)
-```ts
-import { app, BrowserWindow, ipcMain, dialog } from 'electron'
-import { join } from 'node:path'
-
-// ...
-const win = new BrowserWindow({
-  webPreferences: {
-    preload: join(__dirname, '../preload/preload.cjs'), // ✅ CJS file
-    contextIsolation: true,
-    nodeIntegration: false,
-    sandbox: true,
-  },
-})
-console.log('[JSONGRID] preload path:', join(__dirname, '../preload/preload.cjs'))
-```
-
-> You may keep a `preload.ts` for type‑hinting, but **Electron must load** the `.cjs` file at runtime.
-
----
-
-## Vite config (keep it simple)
-
-We do **not** need to force ESM for preload. Either let `vite-plugin-electron` emit CJS or simply **not build preload for dev** and load `preload.cjs` directly as above.
-
-**vite.config.ts** (excerpt)
-```ts
-import electron from 'vite-plugin-electron'
-import renderer from 'vite-plugin-electron-renderer'
-// ...
-export default defineConfig({
-  plugins: [
-    react(),
-    electron({
-      main: { entry: 'electron/main/main.ts', onstart(o){ o.startup() } },
-      // Preload may be omitted in dev (we load preload.cjs directly).
-      // If you keep it, ensure it emits CJS and uses a stable filename:
-      preload: {
-        input: { preload: path.join(__dirname, 'electron/preload/preload.ts') },
-        vite: {
-          build: {
-            sourcemap: true,
-            outDir: 'dist-electron/preload',
-            lib: {
-              entry: path.join(__dirname, 'electron/preload/preload.ts'),
-              formats: ['cjs'],
-              name: 'preload',
-            },
-            rollupOptions: {
-              output: { format: 'cjs', entryFileNames: 'preload.cjs' },
-            },
-          },
-        },
-      },
-    }),
-    renderer(),
-  ],
-})
-```
-
----
-
-## Troubleshooting checklist
-
-1) **Buttons disabled?**  
-   In DevTools Console run:  
-   ```js
-   typeof window.api         // should be "object"
-   ```  
-   If `undefined`, your preload isn’t running. Ensure `preload.cjs` exists and `main.ts` points to it.
-
-2) **“Cannot use import statement outside a module”**  
-   You are loading an ESM preload. Replace it with `preload.cjs` above and point main to it.
-
-3) **Still looking for `preload.js`?**  
-   Something in your config still references `preload.js`. Search the repo and replace with `preload.cjs`.
-
-4) **Start from a clean build**  
-   ```bash
-   rm -rf dist-electron
-   pnpm dev
-   ```
+- **File access**: `src/platform/fileHost.ts` wraps `@tauri-apps/plugin-dialog` +
+  `@tauri-apps/plugin-fs`. In a plain browser (`pnpm dev:web`) it falls back to an
+  `<input type=file>` / blob-download implementation, so the whole app also works as a
+  web app. Detection via `__TAURI_INTERNALS__`.
+- **WebKitGTK gotcha**: virtualized tables must use the `display: grid`/`flex` table
+  pattern. Absolutely-positioned `<tr>` inside a real `<table>` renders fine in Chromium
+  but collapses column layout in WebKitGTK (Tauri's Linux webview). See `GridView.tsx`.
+- **Nested detail panels**: expansion state lives in `GridView` (`Set<"rowId::colKey">`),
+  panels render as full-width cells in the same measured virtual row, so dynamic row
+  heights stay correct.
+- **Edit paths**: cell editors receive base path `[rowIndex, columnKey]`; `NestedGrid`
+  appends keys/indices recursively; `JsonGridWorkspace` applies the edit immutably and
+  re-serializes.
 
 ---
 
 ## Grid not showing?
 
-The grid only renders when the parsed JSON contains an **array of records**. Try one of these samples in the left editor:
+The grid renders when the parsed JSON contains an **array of records**. Try:
 
 ```json
 [
@@ -160,21 +90,5 @@ The grid only renders when the parsed JSON contains an **array of records**. Try
 ]
 ```
 
-```json
-{
-  "user": "Hartman Tyler",
-  "friends": [
-    { "id": 0, "name": "Anastasia Mclean" },
-    { "id": 1, "name": "Douglas Marshall" },
-    { "id": 2, "name": "Chris Stone" }
-  ]
-}
-```
-
----
-
-## Notes for AI tools (Copilot / IDE assistants)
-- This project intentionally mixes **CJS (preload)** and **ESM/TS (renderer)** for Electron compatibility.
-- The public interface exposed to the renderer is `window.api.{openFile, saveFile}`; maintain that contract.
-- Do not suggest converting `require()` in `preload.cjs` to `import`.
-- Security: keep `contextIsolation: true`, `nodeIntegration: false`, and avoid adding new Node globals to the renderer.
+Nested arrays work too — the best candidate array is auto-selected and its path shown
+in the grid info bar.
