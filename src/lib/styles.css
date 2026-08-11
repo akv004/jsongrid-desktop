@@ -92,3 +92,8 @@
   border-color: #3b82f6;
   box-shadow: 0 0 0 1px #3b82f6;
 }
+
+/* Monaco line highlight when a grid cell is clicked */
+.json-line-highlight {
+  background: rgba(250, 204, 21, 0.35);
+}

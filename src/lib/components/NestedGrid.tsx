@@ -13,7 +13,7 @@ type Props = {
 }
 
 const NestedGrid: React.FC<Props> = ({ data, name, depth = 0, path = [], bare = false }) => {
-    const { expandAllToken, collapseAllToken, onEditValue } = useGridContext()
+    const { expandAllToken, collapseAllToken, onEditValue, onSelectPath } = useGridContext()
     const [isExpanded, setIsExpanded] = useState(bare)
     const [isEditing, setIsEditing] = useState(false)
     const [editValue, setEditValue] = useState<string | null>(null)
@@ -102,7 +102,9 @@ const NestedGrid: React.FC<Props> = ({ data, name, depth = 0, path = [], bare = 
         return (
             <div
                 className="value-cell-view"
-                onClick={() => {
+                onClick={(e) => {
+                    if (!e.defaultPrevented) onSelectPath(path)
+                    e.preventDefault()
                     setEditValue(strValue)
                     setIsEditing(true)
                 }}
@@ -158,7 +160,8 @@ const NestedGrid: React.FC<Props> = ({ data, name, depth = 0, path = [], bare = 
     }
 
     const handleToggle = (e: React.MouseEvent) => {
-        e.stopPropagation()
+        if (!e.defaultPrevented) onSelectPath(path)
+        e.preventDefault()
         setIsExpanded(!isExpanded)
     }
 
@@ -188,17 +191,18 @@ const NestedGrid: React.FC<Props> = ({ data, name, depth = 0, path = [], bare = 
                 </div>
             )}
 
-            {/* Nested Content */}
+            {/* Nested Content — width: max-content lets the host column auto-grow to fit */}
             {isExpanded && (
                 <div style={{
                     marginTop: bare ? 0 : 4,
                     border: bare ? 'none' : '1px solid #d1d5db',
                     borderRadius: 4,
-                    overflow: 'hidden',
                     background: 'white',
-                    width: '100%',
+                    width: bare ? '100%' : 'max-content',
+                    minWidth: '100%',
+                    maxWidth: bare ? undefined : 900,
                     boxShadow: bare ? 'none' : '0 1px 2px rgba(0,0,0,0.05)',
-                    overflowX: 'auto'
+                    overflowX: bare ? 'auto' : 'visible'
                 }}>
                     {isArrayOfObjects ? (
                         // Smart Table View for Array of Objects

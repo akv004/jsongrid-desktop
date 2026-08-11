@@ -1,4 +1,4 @@
-import React, { useMemo, useRef, useEffect, useState, useImperativeHandle, forwardRef } from 'react'
+import React, { useMemo, useRef, useEffect, useState, useCallback, useImperativeHandle, forwardRef } from 'react'
 import {
   ColumnDef,
   flexRender,
@@ -10,8 +10,7 @@ import {
   Row,
 } from '@tanstack/react-table'
 import { useVirtualizer } from '@tanstack/react-virtual'
-import { DeriveResult, GridRow, isComplexCell, ComplexCell } from '../utils/deriveGridData'
-import { PlusSquare, MinusSquare, X } from 'lucide-react'
+import { DeriveResult, GridRow, isComplexCell } from '../utils/deriveGridData'
 import NestedGrid from './NestedGrid'
 import { useGridContext } from '../context/GridContext'
 
@@ -25,6 +24,11 @@ export type GridViewHandle = {
   collapseAll: () => void
   setGlobalFilter: (value: string) => void
 }
+
+/** Widest a column may auto-grow to fit expanded nested content */
+const MAX_AUTO_WIDTH = 560
+/** Horizontal padding of a td (12px left + 12px right) plus a small buffer */
+const CELL_PADDING = 26
 
 /**
  * @name exportCSV
@@ -53,45 +57,50 @@ function exportCSV(rows: Row<GridRow>[], columns: string[], filename: string) {
   URL.revokeObjectURL(a.href)
 }
 
-function detailKey(rowId: string, colKey: string) {
-  return `${rowId}::${colKey}`
-}
+/**
+ * Wraps complex-cell content and reports its natural width so the host
+ * column can auto-grow when nested content is expanded (jsongrid.com style).
+ */
+function MeasuredCell({
+  reportKey,
+  onWidth,
+  children,
+}: {
+  reportKey: string
+  onWidth: (key: string, width: number | null) => void
+  children: React.ReactNode
+}) {
+  const ref = useRef<HTMLDivElement>(null)
 
-/** Compact trigger rendered inside the cell for object/array values */
-function CellExpander({ cell, open, onToggle }: { cell: ComplexCell; open: boolean; onToggle: () => void }) {
-  const label = cell.type === 'array' ? `Array [${cell.itemCount ?? ''}]` : `Object {${cell.itemCount ?? ''}}`
+  useEffect(() => {
+    const el = ref.current
+    if (!el) return
+    const report = () => onWidth(reportKey, el.scrollWidth)
+    report()
+    const ro = new ResizeObserver(report)
+    ro.observe(el)
+    return () => {
+      ro.disconnect()
+      onWidth(reportKey, null)
+    }
+  }, [reportKey, onWidth])
+
   return (
-    <button
-      onClick={onToggle}
-      title={open ? 'Collapse details' : 'Expand details below the row'}
-      style={{
-        display: 'inline-flex',
-        alignItems: 'center',
-        gap: 6,
-        border: `1px solid ${open ? '#93c5fd' : '#e5e7eb'}`,
-        background: open ? '#eff6ff' : 'white',
-        color: '#3b82f6',
-        borderRadius: 4,
-        padding: '2px 8px',
-        fontSize: 12,
-        cursor: 'pointer',
-        fontFamily: 'monospace',
-      }}
-    >
-      {open ? <MinusSquare size={13} /> : <PlusSquare size={13} />}
-      <span style={{ color: '#6b7280' }}>{label}</span>
-    </button>
+    <div ref={ref} style={{ width: 'fit-content', maxWidth: '100%' }}>
+      {children}
+    </div>
   )
 }
 
 /**
  * @name GridView
  * @description A virtualized, sortable, and filterable data grid. Object/array cells
- * expand into a full-width detail panel beneath the row (readable at any column width).
+ * expand inline (jsongrid.com style): the column auto-grows to fit nested content,
+ * and clicking any node highlights the matching line in the JSON editor.
  */
 const GridView = forwardRef<GridViewHandle, Props>(({ data, rowHeight = 34 }, ref) => {
   const tableContainerRef = useRef<HTMLDivElement>(null)
-  const { expandAllToken, collapseAllToken } = useGridContext()
+  const { onSelectPath } = useGridContext()
 
   const rows = data?.rows ?? []
   const columnKeys = useMemo(() => data?.columns.map((c) => c.key) ?? [], [data?.columns])
@@ -100,9 +109,9 @@ const GridView = forwardRef<GridViewHandle, Props>(({ data, rowHeight = 34 }, re
 
   const [sorting, setSorting] = React.useState<SortingState>([])
   const [globalFilter, setGlobalFilter] = React.useState('')
-  // Open detail panels, keyed by `${rowId}::${columnKey}`
-  const [openDetails, setOpenDetails] = useState<Set<string>>(new Set())
-  const [containerWidth, setContainerWidth] = useState(0)
+  // Natural content width per expanded complex cell, keyed by `${rowId}::${colKey}`
+  const [cellWidths, setCellWidths] = useState<Record<string, number>>({})
+  const [selectedCell, setSelectedCell] = useState<string | null>(null)
 
   useImperativeHandle(ref, () => ({
     expandAll: () => { },
@@ -110,47 +119,35 @@ const GridView = forwardRef<GridViewHandle, Props>(({ data, rowHeight = 34 }, re
     setGlobalFilter: (value: string) => setGlobalFilter(value),
   }))
 
-  // Keep detail panels within the visible viewport width
-  useEffect(() => {
-    const el = tableContainerRef.current
-    if (!el) return
-    const update = () => setContainerWidth(el.clientWidth)
-    update()
-    const ro = new ResizeObserver(update)
-    ro.observe(el)
-    return () => ro.disconnect()
+  const handleWidth = useCallback((key: string, width: number | null) => {
+    setCellWidths((prev) => {
+      if (width === null) {
+        if (!(key in prev)) return prev
+        const next = { ...prev }
+        delete next[key]
+        return next
+      }
+      const current = prev[key]
+      if (current !== undefined && Math.abs(current - width) < 2) return prev
+      return { ...prev, [key]: width }
+    })
   }, [])
 
-  // Global expand/collapse: open/close every complex cell's detail panel
-  useEffect(() => {
-    if (expandAllToken === 0) return
-    const all = new Set<string>()
-    rows.forEach((r, i) => {
-      columnKeys.forEach((k) => {
-        if (isComplexCell(r[k])) all.add(detailKey(String(i), k))
-      })
-    })
-    setOpenDetails(all)
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [expandAllToken])
+  // Per-column auto width = widest expanded cell in that column
+  const autoWidths = useMemo(() => {
+    const m: Record<string, number> = {}
+    for (const [key, w] of Object.entries(cellWidths)) {
+      const col = key.split('::')[1]
+      m[col] = Math.max(m[col] ?? 0, w)
+    }
+    return m
+  }, [cellWidths])
 
-  useEffect(() => {
-    if (collapseAllToken === 0) return
-    setOpenDetails(new Set())
-  }, [collapseAllToken])
-
-  const toggleDetail = (rowId: string, colKey: string) => {
-    setOpenDetails((prev) => {
-      const next = new Set(prev)
-      const key = detailKey(rowId, colKey)
-      if (next.has(key)) next.delete(key)
-      else next.add(key)
-      return next
-    })
-  }
-
-  const basePathFor = (row: Row<GridRow>, colKey: string): (string | number)[] =>
-    isPrimitiveArray ? [row.index] : [row.index, colKey]
+  const basePathFor = useCallback(
+    (row: Row<GridRow>, colKey: string): (string | number)[] =>
+      isPrimitiveArray ? [row.index] : [row.index, colKey],
+    [isPrimitiveArray]
+  )
 
   const columns = useMemo<ColumnDef<GridRow>[]>(() => {
     return columnKeys.map((key, i) => ({
@@ -159,20 +156,18 @@ const GridView = forwardRef<GridViewHandle, Props>(({ data, rowHeight = 34 }, re
       size: i === 0 ? 250 : 150,
       cell: ({ row, getValue }) => {
         const value = getValue()
+        const path = basePathFor(row, key)
         if (isComplexCell(value)) {
           return (
-            <CellExpander
-              cell={value}
-              open={openDetails.has(detailKey(row.id, key))}
-              onToggle={() => toggleDetail(row.id, key)}
-            />
+            <MeasuredCell reportKey={`${row.id}::${key}`} onWidth={handleWidth}>
+              <NestedGrid data={value} path={path} />
+            </MeasuredCell>
           )
         }
-        return <NestedGrid data={value} path={basePathFor(row, key)} />
+        return <NestedGrid data={value} path={path} />
       },
     }))
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [columnKeys, openDetails, isPrimitiveArray])
+  }, [columnKeys, basePathFor, handleWidth])
 
   const table = useReactTable({
     data: rows,
@@ -194,6 +189,25 @@ const GridView = forwardRef<GridViewHandle, Props>(({ data, rowHeight = 34 }, re
       return false
     },
   })
+
+  // Effective column width: manual/base size, grown to fit expanded content (capped)
+  const effectiveWidth = useCallback(
+    (colId: string, baseSize: number) => {
+      const auto = autoWidths[colId]
+      if (!auto) return baseSize
+      return Math.max(baseSize, Math.min(auto + CELL_PADDING, MAX_AUTO_WIDTH))
+    },
+    [autoWidths]
+  )
+
+  const totalWidth = useMemo(
+    () =>
+      table
+        .getAllLeafColumns()
+        .reduce((sum, col) => sum + effectiveWidth(col.id, col.getSize()), 0),
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    [table, effectiveWidth, table.getState().columnSizing]
+  )
 
   const { rows: tableRows } = table.getRowModel()
   const virtualizer = useVirtualizer({
@@ -238,7 +252,7 @@ const GridView = forwardRef<GridViewHandle, Props>(({ data, rowHeight = 34 }, re
       {/* display:grid/flex table — absolutely-positioned <tr> inside a real table
           breaks column layout on WebKitGTK (Tauri's Linux webview) */}
       <div ref={tableContainerRef} style={{ overflow: 'auto', flex: 1, background: 'white' }}>
-        <table style={{ display: 'grid', width: table.getTotalSize(), borderSpacing: 0 }}>
+        <table style={{ display: 'grid', width: totalWidth, borderSpacing: 0 }}>
           <thead style={{ display: 'grid', background: '#f3f4f6', position: 'sticky', top: 0, zIndex: 1 }}>
             {table.getHeaderGroups().map((headerGroup) => (
               <tr key={headerGroup.id} style={{ display: 'flex', width: '100%' }}>
@@ -249,7 +263,7 @@ const GridView = forwardRef<GridViewHandle, Props>(({ data, rowHeight = 34 }, re
                     style={{
                       display: 'flex',
                       flexShrink: 0,
-                      width: header.getSize(),
+                      width: effectiveWidth(header.column.id, header.getSize()),
                       textAlign: 'left',
                       padding: '8px 12px',
                       borderBottom: '1px solid #e5e7eb',
@@ -296,7 +310,6 @@ const GridView = forwardRef<GridViewHandle, Props>(({ data, rowHeight = 34 }, re
           <tbody style={{ display: 'grid', height: `${virtualizer.getTotalSize()}px`, position: 'relative' }}>
             {virtualizer.getVirtualItems().map((virtualRow) => {
               const row = tableRows[virtualRow.index]
-              const openCols = columnKeys.filter((k) => openDetails.has(detailKey(row.id, k)))
               return (
                 <tr
                   key={row.id}
@@ -304,7 +317,6 @@ const GridView = forwardRef<GridViewHandle, Props>(({ data, rowHeight = 34 }, re
                   ref={virtualizer.measureElement}
                   style={{
                     display: 'flex',
-                    flexWrap: 'wrap',
                     position: 'absolute',
                     top: 0,
                     left: 0,
@@ -314,94 +326,33 @@ const GridView = forwardRef<GridViewHandle, Props>(({ data, rowHeight = 34 }, re
                   }}
                   className="grid-row"
                 >
-                  {row.getVisibleCells().map((cell) => (
-                    <td
-                      key={cell.id}
-                      style={{
-                        display: 'block',
-                        flexShrink: 0,
-                        width: cell.column.getSize(),
-                        padding: '8px 12px',
-                        borderBottom: openCols.length ? 'none' : '1px solid #f3f4f6',
-                        borderRight: '1px solid #f9fafb',
-                        verticalAlign: 'top',
-                        fontSize: 13,
-                        wordBreak: 'break-word',
-                        boxSizing: 'border-box'
-                      }}
-                    >
-                      {flexRender(cell.column.columnDef.cell, cell.getContext())}
-                    </td>
-                  ))}
-
-                  {/* Full-width detail panels for expanded object/array cells */}
-                  {openCols.map((colKey) => {
-                    const cellValue = row.original[colKey]
-                    if (!isComplexCell(cellValue)) return null
+                  {row.getVisibleCells().map((cell) => {
+                    const cellKey = `${row.id}::${cell.column.id}`
                     return (
                       <td
-                        key={`detail-${colKey}`}
+                        key={cell.id}
+                        onClick={(e) => {
+                          setSelectedCell(cellKey)
+                          // Deeper NestedGrid nodes select their own (deeper) path
+                          if (!e.defaultPrevented) onSelectPath(basePathFor(row, cell.column.id))
+                        }}
                         style={{
                           display: 'block',
-                          width: '100%',
+                          flexShrink: 0,
+                          width: effectiveWidth(cell.column.id, cell.column.getSize()),
+                          padding: '8px 12px',
+                          borderBottom: '1px solid #f3f4f6',
+                          borderRight: '1px solid #f9fafb',
+                          verticalAlign: 'top',
+                          fontSize: 13,
+                          wordBreak: 'break-word',
                           boxSizing: 'border-box',
-                          padding: '0 12px 10px',
-                          borderBottom: '1px solid #e5e7eb',
-                          background: 'inherit',
+                          overflowX: 'auto',
+                          background: selectedCell === cellKey ? '#fef9c3' : undefined,
+                          cursor: 'default',
                         }}
                       >
-                        {/* sticky-left keeps the panel visible while scrolling wide tables */}
-                        <div style={{
-                          position: 'sticky',
-                          left: 12,
-                          width: containerWidth ? containerWidth - 24 : '100%',
-                          boxSizing: 'border-box',
-                          border: '1px solid #bfdbfe',
-                          borderRadius: 6,
-                          background: '#f8fafc',
-                          boxShadow: '0 1px 3px rgba(0,0,0,0.06)',
-                          overflow: 'hidden',
-                        }}>
-                          <div style={{
-                            display: 'flex',
-                            alignItems: 'center',
-                            gap: 8,
-                            padding: '6px 10px',
-                            background: '#eff6ff',
-                            borderBottom: '1px solid #bfdbfe',
-                            fontSize: 11,
-                          }}>
-                            <span style={{ color: '#1d4ed8', fontWeight: 600, fontFamily: 'monospace' }}>
-                              {isPrimitiveArray ? `[${row.index}]` : `[${row.index}].${colKey}`}
-                            </span>
-                            <span style={{ color: '#6b7280' }}>
-                              {cellValue.type === 'array' ? `Array [${cellValue.itemCount ?? ''}]` : `Object {${cellValue.itemCount ?? ''}}`}
-                            </span>
-                            <button
-                              onClick={() => toggleDetail(row.id, colKey)}
-                              title="Close"
-                              style={{
-                                marginLeft: 'auto',
-                                display: 'inline-flex',
-                                alignItems: 'center',
-                                border: 'none',
-                                background: 'transparent',
-                                color: '#6b7280',
-                                cursor: 'pointer',
-                                padding: 2,
-                              }}
-                            >
-                              <X size={14} />
-                            </button>
-                          </div>
-                          <div style={{ padding: 8, maxHeight: 420, overflow: 'auto', background: 'white' }}>
-                            <NestedGrid
-                              data={cellValue}
-                              bare
-                              path={basePathFor(row, colKey)}
-                            />
-                          </div>
-                        </div>
+                        {flexRender(cell.column.columnDef.cell, cell.getContext())}
                       </td>
                     )
                   })}

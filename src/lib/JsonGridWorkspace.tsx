@@ -2,6 +2,7 @@ import { useEffect, useMemo, useRef } from 'react'
 import { Allotment } from 'allotment'
 import 'allotment/dist/style.css'
 import JSON5 from 'json5'
+import { parseTree, findNodeAtLocation } from 'jsonc-parser'
 import {
   FileJson,
   Play,
@@ -15,7 +16,7 @@ import {
 } from 'lucide-react'
 
 import { GridProvider, useGridContext } from './context/GridContext'
-import EditorMonaco from './components/EditorMonaco'
+import EditorMonaco, { EditorMonacoHandle } from './components/EditorMonaco'
 import GridView, { GridViewHandle } from './components/GridView'
 import { deriveGridData } from './utils/deriveGridData'
 import { useDebounce } from './hooks/useDebounce'
@@ -31,8 +32,9 @@ export type JsonGridWorkspaceProps = {
 }
 
 function WorkspaceInner({ value, onChange, sampleJson, errorMessage }: JsonGridWorkspaceProps) {
-  const { triggerExpandAll, triggerCollapseAll, registerEditHandler } = useGridContext()
+  const { triggerExpandAll, triggerCollapseAll, registerEditHandler, registerSelectHandler } = useGridContext()
   const gridRef = useRef<GridViewHandle>(null)
+  const editorRef = useRef<EditorMonacoHandle>(null)
 
   const debouncedText = useDebounce(value, 300)
 
@@ -82,6 +84,21 @@ function WorkspaceInner({ value, onChange, sampleJson, errorMessage }: JsonGridW
     })
   }, [gridData, registerEditHandler, value, onChange])
 
+  // Clicking a grid cell/node highlights the corresponding line in the editor
+  useEffect(() => {
+    registerSelectHandler((relativePath) => {
+      if (!gridData) return
+      const base = gridData.pathArray
+        .filter((seg) => seg !== '$')
+        .map((seg) => (/^\[\d+\]$/.test(seg) ? Number(seg.slice(1, -1)) : seg))
+      const fullPath = [...base, ...relativePath]
+      const tree = parseTree(value)
+      if (!tree) return
+      const node = findNodeAtLocation(tree, fullPath)
+      if (node) editorRef.current?.revealOffset(node.offset)
+    })
+  }, [gridData, registerSelectHandler, value])
+
   const handleFormat = () => {
     try {
       onChange(JSON.stringify(JSON.parse(value), null, 2))
@@ -128,7 +145,7 @@ function WorkspaceInner({ value, onChange, sampleJson, errorMessage }: JsonGridW
             </button>
           </div>
           <div style={{ flex: 1, overflow: 'hidden' }}>
-            <EditorMonaco value={value} onChange={onChange} />
+            <EditorMonaco ref={editorRef} value={value} onChange={onChange} />
           </div>
         </div>
       </Allotment.Pane>
